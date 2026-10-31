@@ -1,6 +1,6 @@
 # Activación — App Zepp OS (Amazfit T-Rex 2 y compatibles)
 
-Aplicación de bienestar para relojes **Amazfit (Zepp OS 2.0+)** que estima en tiempo real el **nivel de activación autonómica**, calcula la **FC de reposo diaria** contra tu línea base individual, registra tu **HRV diaria (`RMSSD`)**, calibra un **modelo personal de presión arterial** con tus mediciones de tensiómetro o estudio **MAPA**, y calcula **cómo se relaciona todo**.
+Aplicación de bienestar para relojes **Amazfit con Zepp OS 1.0** (T-Rex 2, GTR 3, GTR 3 Pro, GTS 3) que estima en tiempo real el **nivel de activación autonómica**, calcula la **FC de reposo diaria** contra tu línea base individual, registra tu **HRV diaria (`RMSSD`)**, calibra un **modelo personal de presión arterial** con tus mediciones de tensiómetro o estudio **MAPA**, y calcula **cómo se relaciona todo**.
 
 > ⚠️ **Aviso importante:** Esta aplicación es una herramienta de bienestar y seguimiento fisiológico personal. No es un dispositivo médico ni diagnostica arritmias o hipertensión arterial.
 
@@ -8,13 +8,17 @@ Aplicación de bienestar para relojes **Amazfit (Zepp OS 2.0+)** que estima en t
 
 ## Instalación Rápida por Código QR (Amazfit T-Rex 2)
 
-El paquete compilado en modo `preview` para **Amazfit T-Rex 2** (`deviceSource` 418 / 419, pantalla redonda 454×454 px) se encuentra en [`release/activacion-trex2-v3.zpk`](./release/activacion-trex2-v3.zpk).
+El T-Rex 2 corre **Zepp OS 1.0** (API 1.0), así que la app usa `configVersion: "v2"` y las APIs globales `hmUI` / `hmSensor` / `hmFS` / `hmApp`. Un paquete de Zepp OS 2.0+ (`configVersion: "v3"`, módulos `@zos/*`) no se instala en el T-Rex 2 y da *"failed to unzip the app"*.
+
+El paquete compilado en modo `preview` para **Amazfit T-Rex 2** (`deviceSource` 418 / 419, pantalla redonda 454×454 px) se encuentra en [`release/activacion-trex2-os1.zpk`](./release/activacion-trex2-os1.zpk).
+
+> ⏱️ Los paquetes `preview` caducan **48 h** después de compilarse (`packageInfo.expiredTime`). Si ya pasó ese tiempo, regenera con `node scripts/build-preview.mjs` y sube el cambio. La vía más fiable es `npx zeus login` y luego `npx zeus preview` (elige el target `trex2`), que sube el paquete a Zepp y muestra un QR oficial.
 
 ![Código QR de instalación para Amazfit T-Rex 2](./release/qr-trex2.png)
 
 **URL del protocolo Zepp Developer Mode:**
 ```text
-zpkd1://raw.githubusercontent.com/becerra2906/zepp_hrv_stress_bp_app/main/release/activacion-trex2-v3.zpk
+zpkd1://raw.githubusercontent.com/becerra2906/zepp_hrv_stress_bp_app/main/release/activacion-trex2-os1.zpk
 ```
 
 ### Pasos para instalar en el reloj:
@@ -32,16 +36,17 @@ zpkd1://raw.githubusercontent.com/becerra2906/zepp_hrv_stress_bp_app/main/releas
 ## Arquitectura del Proyecto
 
 ```text
-app.json                 Configuración Zepp OS v3 (API mín. 2.0, pantallas redondas 480px y cuadradas 390px)
-page/home/               Pantalla "Ahora": anillo de activación, FC en vivo, estrés, FC reposo, alertas
+app.json                 Configuración Zepp OS v2 (API 1.0; targets trex2/GTR 3, GTR 3 Pro y GTS 3)
+page/home/               Pantalla "Ahora": anillo de activación, FC en vivo, estrés, FC reposo, alertas (layout.js redonda/cuadrada)
 page/bp/                 Registro de presión arterial en el reloj + detección de anomalías frente al modelo
 page/insights/           Pantalla "Relaciones y HRV": PA estimada, registro HRV diaria y correlaciones Spearman
 app-side/index.js        Side Service en el teléfono: sincronización BLE entre settingsStorage y el reloj
 setting/index.js         App de Ajustes en el teléfono: ingreso individual de PA, importador CSV/MAPA, HRV y perfil
 lib/                     Librería de algoritmos fisiológicos y estadísticos en JS puro (sin dependencias externas)
-utils/                   Almacenamiento en el reloj, series históricas, puente BLE y paleta de colores
+utils/                   Almacenamiento hmFS, pantalla/escala, series históricas, sincronización y paleta de colores
+shared/                  MessageBuilder oficial de Zepp OS 1.0 (BLE reloj ↔ Side Service) y polyfills
 release/                 Paquete .zpk compilado para Amazfit T-Rex 2 y código QR en PNG
-scripts/                 Generadores sin dependencias para icono (make-icon.mjs) y código QR (make-qr.mjs)
+scripts/                 build-preview.mjs (ZPK del T-Rex 2), make-icon.mjs (iconos por target) y make-qr.mjs
 test/                    Suite de 19 pruebas unitarias automatizadas (node --test)
 ```
 
@@ -68,8 +73,9 @@ test/                    Suite de 19 pruebas unitarias automatizadas (node --tes
 ```bash
 npm install                  # Instala dependencias (@zeppos/zeus-cli y @zeppos/device-types)
 npm test                     # Ejecuta las 19 pruebas unitarias (node --test)
-npm run build                # Compila el paquete .zab multi-dispositivo en dist/
+node scripts/build-preview.mjs  # Compila el .zab y copia el ZPK del T-Rex 2 a release/
 node scripts/make-qr.mjs     # Regenera el código QR en release/qr-trex2.png
+npx zeus preview             # Sube a Zepp y muestra un QR oficial (requiere `npx zeus login`)
 npx zeus dev                 # Ejecuta en el simulador oficial de Zepp OS
 ```
 

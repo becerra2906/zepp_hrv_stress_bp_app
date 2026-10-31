@@ -1,8 +1,4 @@
-import { createWidget, widget, prop, align } from '@zos/ui'
-import { HeartRate, Stress, Step } from '@zos/sensor'
-import { push } from '@zos/router'
-import { setPageBrightTime, resetPageBrightTime } from '@zos/display'
-import { LAYOUT } from 'zosLoader:./index.[pf].layout.js'
+import { LAYOUT } from './layout.js'
 
 import { COLORS } from '../../utils/theme.js'
 import { getUser, userHrMax, getDays, upsertDay, dateKey, dailySeries } from '../../utils/data.js'
@@ -48,7 +44,7 @@ function lastBp() {
 }
 
 function text(cfg, value, color = COLORS.text) {
-  return createWidget(widget.TEXT, {
+  return hmUI.createWidget(hmUI.widget.TEXT, {
     x: cfg.x,
     y: cfg.y,
     w: cfg.w,
@@ -56,8 +52,8 @@ function text(cfg, value, color = COLORS.text) {
     text: value,
     text_size: cfg.size,
     color,
-    align_h: align.CENTER_H,
-    align_v: align.CENTER_V,
+    align_h: hmUI.align.CENTER_H,
+    align_v: hmUI.align.CENTER_V,
   })
 }
 
@@ -81,12 +77,12 @@ Page({
 
   onInit() {
     try {
-      setPageBrightTime({ brightTime: 5 * 60 * 1000 })
+      hmSetting.setBrightScreen(5 * 60)
     } catch (e) {}
     const s = this.state
-    s.hrSensor = new HeartRate()
-    s.stressSensor = new Stress()
-    s.stepSensor = new Step()
+    s.hrSensor = hmSensor.createSensor(hmSensor.id.HEART)
+    s.stressSensor = hmSensor.createSensor(hmSensor.id.STRESS)
+    s.stepSensor = hmSensor.createSensor(hmSensor.id.STEP)
     s.sm = createStateMachine(DEFAULT_CONFIG)
     s.hrMax = userHrMax(getUser())
     this.analyzeToday()
@@ -97,12 +93,12 @@ Page({
     })
   },
 
-  /** Reconstruye el día con la FC por minuto (getToday) y guarda FC de reposo y carga. */
+  /** Reconstruye el día con la FC por minuto (heart.today) y guarda FC de reposo y carga. */
   analyzeToday() {
     const s = this.state
     let minutes = []
     try {
-      minutes = s.hrSensor.getToday() || []
+      minutes = s.hrSensor.today || []
     } catch (e) {}
     const today = dateKey()
     const r = restingHrFromDay(minutes)
@@ -120,7 +116,7 @@ Page({
   build() {
     const s = this.state
     const L = LAYOUT
-    s.w.track = createWidget(widget.ARC, {
+    s.w.track = hmUI.createWidget(hmUI.widget.ARC, {
       x: L.ring.x,
       y: L.ring.y,
       w: L.ring.w,
@@ -130,7 +126,7 @@ Page({
       color: COLORS.track,
       line_width: L.ring.lineWidth,
     })
-    s.w.arc = createWidget(widget.ARC, {
+    s.w.arc = hmUI.createWidget(hmUI.widget.ARC, {
       x: L.ring.x,
       y: L.ring.y,
       w: L.ring.w,
@@ -146,7 +142,7 @@ Page({
     s.w.rhr = text(L.rhr, '')
     s.w.load = text(L.load, '')
     s.w.alert = text(L.alert, '', COLORS.danger)
-    createWidget(widget.BUTTON, {
+    hmUI.createWidget(hmUI.widget.BUTTON, {
       x: L.bpButton.x,
       y: L.bpButton.y,
       w: L.bpButton.w,
@@ -156,9 +152,9 @@ Page({
       text_size: L.bpButton.size,
       normal_color: 0x1c3d5a,
       press_color: 0x2fa3ff,
-      click_func: () => push({ url: 'page/bp/index' }),
+      click_func: () => hmApp.gotoPage({ url: 'page/bp/index' }),
     })
-    createWidget(widget.BUTTON, {
+    hmUI.createWidget(hmUI.widget.BUTTON, {
       x: L.insightsButton.x,
       y: L.insightsButton.y,
       w: L.insightsButton.w,
@@ -168,11 +164,11 @@ Page({
       text_size: L.insightsButton.size,
       normal_color: 0x262626,
       press_color: 0x444444,
-      click_func: () => push({ url: 'page/insights/index' }),
+      click_func: () => hmApp.gotoPage({ url: 'page/insights/index' }),
     })
     s.w.bp = text(L.bpLast, '', COLORS.muted)
     // Relleno para permitir desplazamiento hasta el final
-    createWidget(widget.FILL_RECT, {
+    hmUI.createWidget(hmUI.widget.FILL_RECT, {
       x: 0,
       y: L.bpLast.y + L.bpLast.h,
       w: 1,
@@ -187,16 +183,16 @@ Page({
   renderSummary() {
     const s = this.state
     const b = baselineStatus(dailySeries('rhr'), { higherIsBetter: false })
-    s.w.rhr.setProperty(prop.TEXT, `FC reposo ${Math.round(s.rhr)} · ${BASELINE_TEXT[b.status]}`)
+    s.w.rhr.setProperty(hmUI.prop.TEXT, `FC reposo ${Math.round(s.rhr)} · ${BASELINE_TEXT[b.status]}`)
     const t = (s.today && s.today.totals) || null
     if (t) {
       const load = s.today.stressLoad || 0
-      s.w.load.setProperty(prop.TEXT, `Carga hoy ${load} · ${t.recovery} min recup.`)
+      s.w.load.setProperty(hmUI.prop.TEXT, `Carga hoy ${load} · ${t.recovery} min recup.`)
     }
     const bp = lastBp()
     if (bp) {
       const cat = classifyBp(bp.sys, bp.dia)
-      s.w.bp.setProperty(prop.MORE, {
+      s.w.bp.setProperty(hmUI.prop.MORE, {
         text: `Última PA ${bp.sys}/${bp.dia} · ${BP_LABEL_ES[cat]}`,
         color: COLORS.bp[cat],
       })
@@ -208,13 +204,15 @@ Page({
     // Estrés Zepp
     const readStress = () => {
       try {
-        s.stress = stressValue(s.stressSensor.getCurrent())
+        s.stress = stressValue(s.stressSensor.current)
       } catch (e) {}
     }
     readStress()
-    if (typeof s.stressSensor.onChange === 'function') {
+    try {
       s.stressCallback = readStress
-      s.stressSensor.onChange(readStress)
+      s.stressSensor.addEventListener(hmSensor.event.CHANGE, readStress)
+    } catch (e) {
+      s.stressCallback = null
     }
 
     // Movimiento: cadencia de pasos en el último minuto
@@ -222,7 +220,7 @@ Page({
       const now = Date.now()
       let steps = null
       try {
-        steps = s.stepSensor.getCurrent()
+        steps = s.stepSensor.current
       } catch (e) {}
       if (typeof steps !== 'number') return
       s.stepHistory.push({ t: now, steps })
@@ -234,18 +232,18 @@ Page({
     pollSteps()
     s.timers.push(setInterval(pollSteps, STEP_POLL_MS))
 
-    // FC en tiempo real (onCurrentChange en API 2.1; sondeo como respaldo en 2.0)
+    // FC en tiempo real (evento CURRENT de hmSensor; sondeo como respaldo)
     const onHr = () => {
       let hr = null
       try {
-        hr = s.hrSensor.getCurrent()
+        hr = s.hrSensor.current
       } catch (e) {}
       if (typeof hr === 'number' && hr > 0) this.update(hr)
     }
-    if (typeof s.hrSensor.onCurrentChange === 'function') {
+    try {
+      s.hrSensor.addEventListener(hmSensor.event.CURRENT, onHr)
       s.hrCallback = onHr
-      s.hrSensor.onCurrentChange(onHr)
-    } else {
+    } catch (e) {
       s.timers.push(setInterval(onHr, 2000))
     }
 
@@ -266,31 +264,31 @@ Page({
     const st = s.sm.push(r)
     const color = COLORS.state[st]
 
-    s.w.arc.setProperty(prop.MORE, {
+    s.w.arc.setProperty(hmUI.prop.MORE, {
       end_angle: ARC_START + Math.max(1, Math.round((r.score / 100) * ARC_SPAN)),
       color,
     })
-    s.w.score.setProperty(prop.TEXT, String(r.score))
-    s.w.state.setProperty(prop.MORE, { text: STATE_LABEL_ES[st], color })
+    s.w.score.setProperty(hmUI.prop.TEXT, String(r.score))
+    s.w.state.setProperty(hmUI.prop.MORE, { text: STATE_LABEL_ES[st], color })
     const stressTxt = s.stress ? ` · estrés ${s.stress}` : ''
-    s.w.hr.setProperty(prop.TEXT, `${hr} lpm${stressTxt}`)
+    s.w.hr.setProperty(hmUI.prop.TEXT, `${hr} lpm${stressTxt}`)
 
     // Alertas de FC anómala (bienestar, no diagnóstico)
     s.samples.push({ t: now, hr, moving: s.moving })
     s.samples = s.samples.filter((p) => now - p.t <= SAMPLE_BUFFER_MS)
     const alerts = detectAlerts(s.samples)
-    s.w.alert.setProperty(prop.TEXT, alerts.length ? `⚠ ${ALERT_TEXT_ES[alerts[0].type]}` : '')
+    s.w.alert.setProperty(hmUI.prop.TEXT, alerts.length ? `⚠ ${ALERT_TEXT_ES[alerts[0].type]}` : '')
   },
 
   onDestroy() {
     const s = this.state
     s.timers.forEach((t) => clearInterval(t))
     try {
-      if (s.hrCallback) s.hrSensor.offCurrentChange(s.hrCallback)
-      if (s.stressCallback) s.stressSensor.offChange(s.stressCallback)
+      if (s.hrCallback) s.hrSensor.removeEventListener(hmSensor.event.CURRENT, s.hrCallback)
+      if (s.stressCallback) s.stressSensor.removeEventListener(hmSensor.event.CHANGE, s.stressCallback)
     } catch (e) {}
     try {
-      resetPageBrightTime()
+      hmSetting.setBrightScreenCancel()
     } catch (e) {}
   },
 })

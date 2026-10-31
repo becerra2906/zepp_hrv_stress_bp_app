@@ -7,11 +7,12 @@ import path from 'node:path'
 const require = createRequire(import.meta.url)
 const { start } = require('@zeppos/zpm')
 
-// Compila el paquete .zab con los mismos parámetros exactos de `zeus build`, pero en `buildMode: 'preview'`
+// Compila el paquete .zab (Zepp OS 1.0, configVersion v2) con los parámetros de `zeus build`, pero en `buildMode: 'preview'`.
+// Ojo: los paquetes preview caducan a las 48 h (packageInfo.expiredTime), hay que regenerarlos antes de instalar.
 const zabName = await start({
   path: process.cwd(),
   buildMode: 'preview',
-  targets: ['default'],
+  targets: ['trex2', 'gtr3-pro', 'gts3'],
   sources: [],
   jsc: 'bin',
   png2vg: true,
@@ -24,7 +25,12 @@ const zabName = await start({
 const tmpDir = path.join('dist', '_tmp_preview_extract')
 rmSync(tmpDir, { recursive: true, force: true })
 mkdirSync(tmpDir, { recursive: true })
-execSync(`tar -xf "${path.join('dist', zabName)}" -C "${tmpDir}"`)
+// El .zab es un ZIP: hace falta bsdtar (el tar.exe de Windows); el GNU tar de Git Bash no lo abre.
+const tarBin =
+  process.platform === 'win32'
+    ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe')
+    : 'tar'
+execSync(`"${tarBin}" -xf "${path.join('dist', zabName)}" -C "${tmpDir}"`)
 
 const manifest = JSON.parse(readFileSync(path.join(tmpDir, 'manifest.json'), 'utf8'))
 const trexEntry = manifest.zpks.find((z) =>
@@ -50,8 +56,7 @@ if (actualMd5 !== trexEntry.md5) {
 
 mkdirSync('release', { recursive: true })
 copyFileSync(zpkPath, path.join('release', 'activacion-trex2.zpk'))
-copyFileSync(zpkPath, path.join('release', 'activacion-trex2-preview.zpk'))
-copyFileSync(zpkPath, path.join('release', 'activacion-trex2-v3.zpk'))
+copyFileSync(zpkPath, path.join('release', 'activacion-trex2-os1.zpk'))
 
 rmSync(tmpDir, { recursive: true, force: true })
 console.log('Verified native @zeppos/zpm preview ZPK:', {

@@ -3,6 +3,9 @@
  * Sincroniza el perfil de usuario, lecturas individuales de PA, importaciones de MAPA
  * y registros de HRV entre settingsStorage (teléfono) y el reloj.
  */
+import { MessageBuilder } from '../shared/message'
+
+const messageBuilder = new MessageBuilder()
 
 function getSettingsPayload() {
   try {
@@ -20,30 +23,15 @@ function getSettingsPayload() {
   }
 }
 
-function sendPayloadToWatch() {
-  try {
-    if (typeof messaging === 'undefined' || !messaging.peerSocket) return
-    const str = JSON.stringify(getSettingsPayload())
-    const buf = new Uint8Array(str.length)
-    for (let i = 0; i < str.length; i++) buf[i] = str.charCodeAt(i)
-    messaging.peerSocket.send(buf.buffer)
-  } catch (e) {}
-}
-
 AppSideService({
   onInit() {
-    try {
-      if (typeof messaging !== 'undefined' && messaging.peerSocket) {
-        messaging.peerSocket.addListener('message', () => {
-          sendPayloadToWatch()
-        })
+    messageBuilder.listen(() => {})
+    messageBuilder.on('request', (ctx) => {
+      const payload = messageBuilder.buf2Json(ctx.request.payload)
+      if (payload && payload.method === 'SYNC_REQ') {
+        ctx.response({ data: getSettingsPayload() })
       }
-      if (typeof settings !== 'undefined' && settings.settingsStorage) {
-        settings.settingsStorage.addListener('change', () => {
-          sendPayloadToWatch()
-        })
-      }
-    } catch (e) {}
+    })
   },
   onRun() {},
   onDestroy() {},

@@ -2,7 +2,7 @@
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { deflateSync } from 'node:zlib'
 
-const S = 248
+const S = 92 // tamaño de icono de app en Zepp OS 1.0
 const crcTable = Array.from({ length: 256 }, (_, n) => {
   let c = n
   for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
@@ -61,7 +61,7 @@ const png = Buffer.concat([
   chunk('IDAT', deflateSync(raw)),
   chunk('IEND', Buffer.alloc(0)),
 ])
-for (const dir of ['assets/default.r', 'assets/default.s']) {
+for (const dir of ['assets/trex2', 'assets/gtr3-pro', 'assets/gts3']) {
   mkdirSync(dir, { recursive: true })
   writeFileSync(`${dir}/icon.png`, png)
 }

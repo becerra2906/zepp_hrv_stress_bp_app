@@ -1,16 +1,11 @@
-import { createWidget, widget, prop, align, text_style } from '@zos/ui'
-import { back } from '@zos/router'
-import { getDeviceInfo, SCREEN_SHAPE_ROUND } from '@zos/device'
-import { px } from '@zos/utils'
-
+import { W, IS_ROUND, scale } from '../../utils/device.js'
 import { COLORS } from '../../utils/theme.js'
 import { addBpReading, getDays, getAllBpReadings } from '../../utils/data.js'
 import { validateReading, classifyBp, derivedBp, BP_LABEL_ES } from '../../lib/bp.js'
 import { trainPersonalBpModel, evaluateBpAnomaly } from '../../lib/bpModel.js'
 
-const { width: W, screenShape } = getDeviceInfo()
 // En pantallas redondas se deja más margen superior para no cortar contenido.
-const TOP = screenShape === SCREEN_SHAPE_ROUND ? px(70) : px(30)
+const TOP = IS_ROUND ? scale(70) : scale(30)
 
 const FIELDS = [
   { key: 'sys', label: 'Sistólica', min: 60, max: 260 },
@@ -40,60 +35,60 @@ Page({
 
   build() {
     const s = this.state
-    const rowH = px(96)
-    const btn = px(76)
+    const rowH = scale(96)
+    const btn = scale(76)
 
-    createWidget(widget.TEXT, {
-      x: 0, y: TOP, w: W, h: px(50),
-      text: 'Presión arterial', text_size: px(32), color: COLORS.text,
-      align_h: align.CENTER_H, align_v: align.CENTER_V,
+    hmUI.createWidget(hmUI.widget.TEXT, {
+      x: 0, y: TOP, w: W, h: scale(50),
+      text: 'Presión arterial', text_size: scale(32), color: COLORS.text,
+      align_h: hmUI.align.CENTER_H, align_v: hmUI.align.CENTER_V,
     })
 
     FIELDS.forEach((f, i) => {
-      const y = TOP + px(60) + i * rowH
-      createWidget(widget.TEXT, {
-        x: 0, y, w: W, h: px(28),
-        text: f.label, text_size: px(22), color: COLORS.muted,
-        align_h: align.CENTER_H, align_v: align.CENTER_V,
+      const y = TOP + scale(60) + i * rowH
+      hmUI.createWidget(hmUI.widget.TEXT, {
+        x: 0, y, w: W, h: scale(28),
+        text: f.label, text_size: scale(22), color: COLORS.muted,
+        align_h: hmUI.align.CENTER_H, align_v: hmUI.align.CENTER_V,
       })
-      const rowY = y + px(26)
+      const rowY = y + scale(26)
       const step = (delta) => {
         const v = Math.min(f.max, Math.max(f.min, s.values[f.key] + delta))
         s.values[f.key] = v
-        s.w[f.key].setProperty(prop.TEXT, String(v))
+        s.w[f.key].setProperty(hmUI.prop.TEXT, String(v))
         this.renderPreview()
       }
-      createWidget(widget.BUTTON, {
-        x: W / 2 - px(170), y: rowY, w: btn, h: px(60), radius: px(30),
-        text: '−', text_size: px(40), normal_color: 0x262626, press_color: 0x444444,
+      hmUI.createWidget(hmUI.widget.BUTTON, {
+        x: W / 2 - scale(170), y: rowY, w: btn, h: scale(60), radius: scale(30),
+        text: '−', text_size: scale(40), normal_color: 0x262626, press_color: 0x444444,
         click_func: () => step(-1),
         longpress_func: () => step(-5),
       })
-      s.w[f.key] = createWidget(widget.TEXT, {
-        x: W / 2 - px(80), y: rowY, w: px(160), h: px(60),
-        text: String(s.values[f.key]), text_size: px(48), color: COLORS.text,
-        align_h: align.CENTER_H, align_v: align.CENTER_V,
+      s.w[f.key] = hmUI.createWidget(hmUI.widget.TEXT, {
+        x: W / 2 - scale(80), y: rowY, w: scale(160), h: scale(60),
+        text: String(s.values[f.key]), text_size: scale(48), color: COLORS.text,
+        align_h: hmUI.align.CENTER_H, align_v: hmUI.align.CENTER_V,
       })
-      createWidget(widget.BUTTON, {
-        x: W / 2 + px(170) - btn, y: rowY, w: btn, h: px(60), radius: px(30),
-        text: '+', text_size: px(40), normal_color: 0x262626, press_color: 0x444444,
+      hmUI.createWidget(hmUI.widget.BUTTON, {
+        x: W / 2 + scale(170) - btn, y: rowY, w: btn, h: scale(60), radius: scale(30),
+        text: '+', text_size: scale(40), normal_color: 0x262626, press_color: 0x444444,
         click_func: () => step(1),
         longpress_func: () => step(5),
       })
     })
 
-    const yPrev = TOP + px(60) + FIELDS.length * rowH + px(4)
-    s.w.preview = createWidget(widget.TEXT, {
-      x: px(20), y: yPrev, w: W - px(40), h: px(60),
-      text: '', text_size: px(22), color: COLORS.muted,
-      align_h: align.CENTER_H, align_v: align.CENTER_V, text_style: text_style.WRAP,
+    const yPrev = TOP + scale(60) + FIELDS.length * rowH + scale(4)
+    s.w.preview = hmUI.createWidget(hmUI.widget.TEXT, {
+      x: scale(20), y: yPrev, w: W - scale(40), h: scale(60),
+      text: '', text_size: scale(22), color: COLORS.muted,
+      align_h: hmUI.align.CENTER_H, align_v: hmUI.align.CENTER_V, text_style: hmUI.text_style.WRAP,
     })
-    createWidget(widget.BUTTON, {
-      x: W / 2 - px(110), y: yPrev + px(66), w: px(220), h: px(66), radius: px(33),
-      text: 'Guardar', text_size: px(30), normal_color: 0x1c3d5a, press_color: 0x2fa3ff,
+    hmUI.createWidget(hmUI.widget.BUTTON, {
+      x: W / 2 - scale(110), y: yPrev + scale(66), w: scale(220), h: scale(66), radius: scale(33),
+      text: 'Guardar', text_size: scale(30), normal_color: 0x1c3d5a, press_color: 0x2fa3ff,
       click_func: () => this.saveReading(),
     })
-    createWidget(widget.FILL_RECT, { x: 0, y: yPrev + px(140), w: 1, h: px(120), color: COLORS.bg })
+    hmUI.createWidget(hmUI.widget.FILL_RECT, { x: 0, y: yPrev + scale(140), w: 1, h: scale(120), color: COLORS.bg })
     this.renderPreview()
   },
 
@@ -101,7 +96,7 @@ Page({
     const { sys, dia, pulse } = this.state.values
     const errors = validateReading(this.state.values)
     if (errors.length) {
-      this.state.w.preview.setProperty(prop.MORE, { text: 'Valores no válidos', color: COLORS.danger })
+      this.state.w.preview.setProperty(hmUI.prop.MORE, { text: 'Valores no válidos', color: COLORS.danger })
       return
     }
     const cat = classifyBp(sys, dia)
@@ -115,13 +110,13 @@ Page({
         msg += ` (${anom.anomaly === 'high' ? '▲ alta' : '▼ baja'} vs estimación)`
       }
     }
-    this.state.w.preview.setProperty(prop.MORE, { text: msg, color: COLORS.bp[cat] })
+    this.state.w.preview.setProperty(hmUI.prop.MORE, { text: msg, color: COLORS.bp[cat] })
   },
 
   saveReading() {
     const v = this.state.values
     if (validateReading(v).length) return
     addBpReading({ sys: v.sys, dia: v.dia, pulse: v.pulse, t: Date.now(), src: 'watch' })
-    back()
+    hmApp.goBack()
   },
 })
