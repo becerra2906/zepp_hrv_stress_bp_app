@@ -29,21 +29,45 @@ export function dateKey(d = new Date()) {
   return `${d.getFullYear()}-${m}-${day}`
 }
 
-/** Registros diarios: { date, rhr, stressLoad, totals, bp: [{sys,dia,pulse,t}] } */
+// El perfil horario solo lo usa el pronóstico (últimas 4 semanas): en días más viejos se borra para que
+// el archivo no crezca (leerlo y escribirlo entero es lo más caro de la app).
+const KEEP_HOURLY_DAYS = 35
+
+// Caché en memoria del historial: se lee del archivo una vez por página (invalidateDays en onInit)
+// y cada escritura la mantiene al día.
+let daysCache = null
+
+/** Fuerza a releer el archivo; llamar en onInit, otra página pudo haberlo cambiado. */
+export function invalidateDays() {
+  daysCache = null
+}
+
+/** Registros diarios: { date, rhr, stressLoad, totals, bp: [{sys,dia,pulse,t}] }. No mutar el resultado. */
 export function getDays() {
-  return load(KEY_DAYS, [])
+  if (!daysCache) daysCache = load(KEY_DAYS, [])
+  return daysCache
+}
+
+function saveDays(days) {
+  const kept = days.slice(-MAX_DAYS)
+  for (let i = 0; i < kept.length - KEEP_HOURLY_DAYS; i++) if (kept[i].hourly) delete kept[i].hourly
+  daysCache = kept
+  save(KEY_DAYS, kept)
 }
 
 export function upsertDay(date, patch) {
   const days = getDays()
   let rec = days.find((d) => d.date === date)
-  if (!rec) {
+  const isNew = !rec
+  if (isNew) {
     rec = { date, bp: [] }
     days.push(rec)
     days.sort((a, b) => (a.date < b.date ? -1 : 1))
   }
+  // Solo se escribe si algo cambió: evita reescribir el archivo en cada refresco
+  const before = isNew ? null : JSON.stringify(rec)
   Object.assign(rec, patch)
-  save(KEY_DAYS, days.slice(-MAX_DAYS))
+  if (isNew || JSON.stringify(rec) !== before) saveDays(days)
   return rec
 }
 
@@ -122,7 +146,7 @@ export function deleteBpReading(timestamp) {
       const filtered = d.bp.filter((r) => r.t !== timestamp)
       if (filtered.length !== d.bp.length) {
         d.bp = filtered
-        save(KEY_DAYS, days)
+        saveDays(days)
         return true
       }
     }

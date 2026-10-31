@@ -2,10 +2,11 @@ import { LAYOUT } from './layout.js'
 import { scale, COL_W } from '../../utils/device.js'
 
 import { COLORS } from '../../utils/theme.js'
-import { label, pill, card, bottomPad } from '../../utils/ui.js'
-import { getUser, userHrMax, getDays, upsertDay, dateKey, dailySeries } from '../../utils/data.js'
+import { label, pill, card, bottomPad, setProp, clearProps } from '../../utils/ui.js'
+import { getUser, userHrMax, getDays, upsertDay, dateKey, dailySeries, invalidateDays } from '../../utils/data.js'
 import { requestPhoneSync, pushHistoryToPhone } from '../../utils/sync.js'
 import { every, stop } from '../../utils/timer.js'
+import { swipeExitApp, releaseSwipe } from '../../utils/nav.js'
 import { restingHrFromDay } from '../../lib/restingHr.js'
 import { hrvProxyFromDay } from '../../lib/hrvProxy.js'
 import { activationScore, createStateMachine, analyzeDay, STATE_LABEL_ES, DEFAULT_CONFIG } from '../../lib/activation.js'
@@ -13,12 +14,21 @@ import { baselineStatus } from '../../lib/baseline.js'
 import { detectAlerts, ALERT_TEXT_ES } from '../../lib/alerts.js'
 import { classifyBp, BP_LABEL_ES } from '../../lib/bp.js'
 import { hourlyProfile, peakHour, lastDaysSeries, trendOf, barHeights } from '../../lib/daily.js'
+import { forecastDay, expectedPeak, compareToForecast } from '../../lib/forecast.js'
+import { READINESS_LABEL_ES, READINESS_SHIFT } from '../../lib/readiness.js'
+
+// Días con perfil horario que necesita el pronóstico (mínimo por hora en forecastDay)
+const FORECAST_MIN_DAYS = 3
 
 const ARC_START = -225 // anillo de 270° abierto abajo
 const ARC_SPAN = 270
 const STEP_POLL_MS = 15 * 1000
 const HR_POLL_MS = 2000
 const STRESS_POLL_MS = 60 * 1000
+// Reanalizar el día (FC por minuto, guardar historial) cada 5 min: los datos cambian poco más rápido
+const ANALYZE_MS = 5 * 60 * 1000
+// Evento y sondeo de FC pueden llegar casi juntos: no procesar dos lecturas en menos de esto
+const HR_MIN_GAP_MS = 1500
 const SAMPLE_BUFFER_MS = 15 * 60 * 1000
 const RHR_FALLBACK = 60
 
@@ -99,11 +109,14 @@ Page({
     moving: false,
     stepHistory: [], // [{t, steps}]
     samples: [], // [{t, hr, moving}] para alertas
+    lastHrAt: 0,
+    forecastKey: null,
     profile: null, // 24 horas: { score, state, meanHr }
     w: {},
   },
 
   onInit() {
+    invalidateDays()
     try {
       hmSetting.setBrightScreen(5 * 60)
     } catch (e) {}
@@ -139,6 +152,8 @@ Page({
       patch.stressLoad = day.stressLoad
       patch.totals = day.totals
       s.profile = hourlyProfile(minutes, day.timeline)
+      // Activación media por hora: es lo que aprende el pronóstico de los días siguientes
+      patch.hourly = s.profile.map((p) => p.score)
       const night = hrvProxyFromDay(minutes)
       if (night) {
         patch.hrvProxy = night.proxy
@@ -146,11 +161,22 @@ Page({
       }
     }
     s.today = upsertDay(today, patch)
+    // El pronóstico solo depende de días anteriores y de la preparación de hoy: se recalcula si cambian
+    const fKey = `${today}|${s.today.readiness || ''}`
+    if (s.forecastKey !== fKey) {
+      s.forecast = forecastDay(getDays(), {
+        date: today,
+        minDays: FORECAST_MIN_DAYS,
+        shift: READINESS_SHIFT[s.today.readiness] || 0,
+      })
+      s.forecastKey = fKey
+    }
   },
 
   build() {
     const s = this.state
     const L = LAYOUT
+    this.state.swipe = swipeExitApp()
     s.w.track = hmUI.createWidget(hmUI.widget.ARC, {
       x: L.ring.x,
       y: L.ring.y,
@@ -179,6 +205,7 @@ Page({
 
     // Hoy: resumen 2×2
     label(L.tiles.x, L.hoyHeader.y, COL_W, L.header.h, 'Hoy', L.header.size, COLORS.text, hmUI.align.LEFT)
+    s.w.readiness = label(L.tiles.x + scale(60), L.hoyHeader.y, COL_W - scale(60), L.header.h, '', scale(16), COLORS.muted, hmUI.align.RIGHT)
     const P = L.tiles
     const tile = (i, title) => {
       const x = P.x + (i % 2) * (P.w + P.gap)
@@ -195,21 +222,19 @@ Page({
     s.w.tHrv = tile(2, 'HRV')
     s.w.tBp = tile(3, 'Última PA')
 
-    // Tu día: actividad por hora (altura = activación media, color = estado dominante)
+    // Tu día: actividad por hora (altura = activación media, color = estado dominante).
+    // Detrás, el pronóstico: rango probable (gris) y marca del valor esperado; las horas futuras solo muestran eso.
     const D = L.day
     label(D.x, D.headerY, D.w, L.header.h, 'Tu día', L.header.size, COLORS.text, hmUI.align.LEFT)
     s.w.peak = label(D.x + scale(90), D.headerY, D.w - scale(90), L.header.h, '', scale(16), COLORS.muted, hmUI.align.RIGHT)
     card(D.x, D.y, D.w, D.h, D.radius)
     s.w.dayBase = D.y + D.pad + D.barMaxH
     s.w.dayBars = []
+    const flat = (x, color) =>
+      hmUI.createWidget(hmUI.widget.FILL_RECT, { x, y: s.w.dayBase - scale(4), w: D.barW, h: scale(4), radius: scale(3), color })
     for (let h = 0; h < 24; h++) {
       const x = D.x + D.pad + h * (D.barW + D.barGap)
-      s.w.dayBars.push({
-        x,
-        rect: hmUI.createWidget(hmUI.widget.FILL_RECT, {
-          x, y: s.w.dayBase - scale(4), w: D.barW, h: scale(4), radius: scale(3), color: COLORS.track,
-        }),
-      })
+      s.w.dayBars.push({ x, band: flat(x, COLORS.card), rect: flat(x, COLORS.track), mark: flat(x, COLORS.card) })
     }
     const ticks = ['0 h', '6', '12', '18', '24']
     const innerW = D.w - D.pad * 2
@@ -248,6 +273,8 @@ Page({
       s.w.weekLabels.push(label(x, lastY - scale(4), K.barW + scale(12), scale(22), '', K.labelSize, COLORS.muted))
     }
 
+    const R = L.readinessButton
+    pill(R.x, R.y, R.w, R.h, 'Medir preparación', R.size, () => hmApp.gotoPage({ url: 'page/readiness/index' }), 'primary')
     const B = L.bpButton
     pill(B.x, B.y, B.w, B.h, 'Registrar presión', B.size, () => hmApp.gotoPage({ url: 'page/bp/index' }), 'secondary')
     const I = L.insightsButton
@@ -264,37 +291,43 @@ Page({
 
     // Resumen 2×2
     const b = baselineStatus(dailySeries('rhr'), { higherIsBetter: false })
-    s.w.tRhr.value.setProperty(hmUI.prop.TEXT, String(Math.round(s.rhr)))
-    s.w.tRhr.context.setProperty(hmUI.prop.MORE, { text: BASELINE_TEXT[b.status], color: BASELINE_COLOR[b.status] })
+    setProp(s.w.tRhr.value, hmUI.prop.TEXT, String(Math.round(s.rhr)))
+    setProp(s.w.tRhr.context, hmUI.prop.MORE, { text: BASELINE_TEXT[b.status], color: BASELINE_COLOR[b.status] })
 
     const load = typeof today.stressLoad === 'number' ? today.stressLoad : null
-    s.w.tStress.value.setProperty(hmUI.prop.TEXT, load === null ? '--' : String(Math.round(load)))
+    setProp(s.w.tStress.value, hmUI.prop.TEXT, load === null ? '--' : String(Math.round(load)))
     const calmMin = today.totals ? (today.totals.recovery || 0) + (today.totals.balance || 0) : null
-    s.w.tStress.context.setProperty(
+    setProp(s.w.tStress.context, 
       hmUI.prop.TEXT,
       calmMin === null ? 'sin datos aún' : calmMin >= 60 ? `${Math.floor(calmMin / 60)} h en calma` : `${calmMin} min en calma`
     )
 
     if (typeof today.rmssd === 'number') {
-      s.w.tHrv.value.setProperty(hmUI.prop.TEXT, `${Math.round(today.rmssd)} ms`)
-      s.w.tHrv.context.setProperty(hmUI.prop.TEXT, 'medida hoy')
+      setProp(s.w.tHrv.value, hmUI.prop.TEXT, `${Math.round(today.rmssd)} ms`)
+      setProp(s.w.tHrv.context, hmUI.prop.TEXT, 'medida hoy')
     } else if (typeof today.hrvProxy === 'number') {
-      s.w.tHrv.value.setProperty(hmUI.prop.TEXT, `${Math.round(today.hrvProxy)} ms`)
-      s.w.tHrv.context.setProperty(hmUI.prop.TEXT, 'proxy nocturno')
+      setProp(s.w.tHrv.value, hmUI.prop.TEXT, `${Math.round(today.hrvProxy)} ms`)
+      setProp(s.w.tHrv.context, hmUI.prop.TEXT, 'proxy nocturno')
     } else {
-      s.w.tHrv.value.setProperty(hmUI.prop.TEXT, '--')
-      s.w.tHrv.context.setProperty(hmUI.prop.TEXT, 'sin datos de noche')
+      setProp(s.w.tHrv.value, hmUI.prop.TEXT, '--')
+      setProp(s.w.tHrv.context, hmUI.prop.TEXT, 'sin datos de noche')
     }
 
     const bp = lastBp()
     if (bp) {
       const cat = classifyBp(bp.sys, bp.dia)
-      s.w.tBp.value.setProperty(hmUI.prop.TEXT, `${bp.sys}/${bp.dia}`)
-      s.w.tBp.context.setProperty(hmUI.prop.MORE, { text: BP_LABEL_ES[cat], color: COLORS.bp[cat] })
+      setProp(s.w.tBp.value, hmUI.prop.TEXT, `${bp.sys}/${bp.dia}`)
+      setProp(s.w.tBp.context, hmUI.prop.MORE, { text: BP_LABEL_ES[cat], color: COLORS.bp[cat] })
     } else {
-      s.w.tBp.value.setProperty(hmUI.prop.TEXT, '--')
-      s.w.tBp.context.setProperty(hmUI.prop.MORE, { text: 'sin registros', color: COLORS.muted })
+      setProp(s.w.tBp.value, hmUI.prop.TEXT, '--')
+      setProp(s.w.tBp.context, hmUI.prop.MORE, { text: 'sin registros', color: COLORS.muted })
     }
+
+    const tag = today.readiness
+    setProp(s.w.readiness, 
+      hmUI.prop.MORE,
+      tag ? { text: `Preparación: ${READINESS_LABEL_ES[tag]}`, color: COLORS.readiness[tag] } : { text: 'Sin medir hoy', color: COLORS.muted }
+    )
 
     this.renderDay()
     this.renderWeek()
@@ -304,17 +337,50 @@ Page({
     const s = this.state
     const D = LAYOUT.day
     const prof = s.profile || []
+    const fc = s.forecast || { ready: false, days: 0, hours: [] }
+    const nowHour = new Date().getHours()
+    const px = (v) => Math.round((v / 100) * D.barMaxH)
     s.w.dayBars.forEach((bar, h) => {
       const p = prof[h]
       const has = p && p.score !== null
-      const bh = has ? Math.max(scale(4), Math.round((p.score / 100) * D.barMaxH)) : scale(4)
-      bar.rect.setProperty(hmUI.prop.MORE, {
+      const bh = has ? Math.max(scale(4), px(p.score)) : scale(4)
+      setProp(bar.rect, hmUI.prop.MORE, {
         x: bar.x, y: s.w.dayBase - bh, w: D.barW, h: bh, radius: scale(3),
+        // Sin dato: en horas futuras con pronóstico se deja ver solo el rango
         color: has ? COLORS.state[p.state] : COLORS.track,
       })
+      const f = fc.hours[h]
+      const hasF = f && f.expected !== null
+      const bandTop = hasF ? s.w.dayBase - Math.max(scale(4), px(f.high)) : s.w.dayBase - scale(4)
+      const bandH = hasF ? Math.max(scale(4), px(f.high) - px(f.low)) : scale(4)
+      setProp(bar.band, hmUI.prop.MORE, {
+        x: bar.x, y: bandTop, w: D.barW, h: bandH, radius: scale(3),
+        color: hasF ? COLORS.forecastBand : COLORS.card,
+      })
+      setProp(bar.mark, hmUI.prop.MORE, {
+        x: bar.x, y: s.w.dayBase - Math.max(scale(3), px(hasF ? f.expected : 0)), w: D.barW, h: scale(3), radius: 0,
+        color: hasF ? COLORS.forecastMark : COLORS.card,
+      })
     })
-    const pk = peakHour(prof)
-    s.w.peak.setProperty(hmUI.prop.TEXT, pk ? `Pico: ${hourText(pk.hour)} · ${STATE_LABEL_ES[pk.state]}` : '')
+
+    if (!fc.ready) {
+      const pk = peakHour(prof)
+      const missing = Math.max(1, FORECAST_MIN_DAYS - fc.days)
+      setProp(s.w.peak, hmUI.prop.MORE, {
+        text: pk ? `Pico: ${hourText(pk.hour)} · ${STATE_LABEL_ES[pk.state]}` : `Pronóstico en ${missing} ${missing === 1 ? 'día' : 'días'}`,
+        color: COLORS.muted,
+      })
+      return
+    }
+    const cmp = compareToForecast(fc, prof, nowHour)
+    if (cmp && cmp.hour === nowHour && cmp.status === 'above') {
+      setProp(s.w.peak, hmUI.prop.MORE, { text: 'Ahora: sobre lo esperado', color: COLORS.state.activation })
+    } else if (cmp && cmp.hour === nowHour && cmp.status === 'below') {
+      setProp(s.w.peak, hmUI.prop.MORE, { text: 'Ahora: más calma de lo esperado', color: COLORS.state.recovery })
+    } else {
+      const pk = expectedPeak(fc, nowHour)
+      setProp(s.w.peak, hmUI.prop.MORE, { text: pk ? `Pico esperado: ${hourText(pk.hour)}` : '', color: COLORS.muted })
+    }
   },
 
   renderWeek() {
@@ -328,20 +394,20 @@ Page({
       const last = series[series.length - 1].value
       const trend = trendOf(series)
       const valueTxt = last === null ? '--' : `${Math.round(last)}${r.unit}`
-      row.value.setProperty(hmUI.prop.MORE, {
+      setProp(row.value, hmUI.prop.MORE, {
         text: `${valueTxt} · ${TREND_TEXT[trend]}`,
         color: trend === 'none' ? COLORS.text : trendColor(trend, r.goodWhen),
       })
       row.bars.forEach((bar, d) => {
         const hv = heights[d]
         const bh = hv === null ? scale(4) : Math.max(scale(4), Math.round(hv * K.barMaxH))
-        bar.rect.setProperty(hmUI.prop.MORE, {
+        setProp(bar.rect, hmUI.prop.MORE, {
           x: bar.x, y: row.base - bh, w: K.barW, h: bh, radius: scale(4),
           // Hoy en el color de la métrica; días anteriores en gris para no competir
           color: hv === null ? COLORS.track : d === 6 ? r.color : COLORS.trackLight,
         })
       })
-      if (i === 0) series.forEach((p, d) => s.w.weekLabels[d].setProperty(hmUI.prop.TEXT, p.label))
+      if (i === 0) series.forEach((p, d) => setProp(s.w.weekLabels[d], hmUI.prop.TEXT, p.label))
     })
   },
 
@@ -387,7 +453,10 @@ Page({
       try {
         hr = s.hrSensor.current || s.hrSensor.last
       } catch (e) {}
-      if (typeof hr === 'number' && hr > 0) this.update(hr)
+      const now = Date.now()
+      if (typeof hr !== 'number' || hr <= 0 || now - s.lastHrAt < HR_MIN_GAP_MS) return
+      s.lastHrAt = now
+      this.update(hr)
     }
     try {
       s.hrSensor.addEventListener(s.hrSensor.event.CURRENT, onHr)
@@ -401,9 +470,9 @@ Page({
     // Cada 15 min: mandar el historial al teléfono (Ajustes → Historial del reloj)
     s.timers.push(every(15 * 60 * 1000, pushHistoryToPhone))
 
-    // Cada minuto: refrescar resumen (incluye PA recién registrada)
+    // Cada 5 min: reanalizar el día y refrescar el resumen
     s.timers.push(
-      every(60 * 1000, () => {
+      every(ANALYZE_MS, () => {
         this.analyzeToday()
         this.renderSummary()
       })
@@ -414,25 +483,25 @@ Page({
     const s = this.state
     const now = Date.now()
     const stressTxt = s.stress ? ` · estrés ${s.stress}` : ''
-    s.w.hr.setProperty(hmUI.prop.MORE, { text: `${hr} lpm${stressTxt}`, color: COLORS.text })
+    setProp(s.w.hr, hmUI.prop.MORE, { text: `${hr} lpm${stressTxt}`, color: COLORS.text })
     const r = activationScore({ hr, rhr: s.rhr, hrMax: s.hrMax, moving: s.moving, stress: s.stress })
     if (!r) return
     const st = s.sm.push(r)
     const color = COLORS.state[st]
 
-    s.w.arc.setProperty(hmUI.prop.MORE, {
+    setProp(s.w.arc, hmUI.prop.MORE, {
       end_angle: ARC_START + Math.max(1, Math.round((r.score / 100) * ARC_SPAN)),
       color,
     })
-    s.w.score.setProperty(hmUI.prop.TEXT, String(r.score))
-    s.w.state.setProperty(hmUI.prop.MORE, { text: STATE_LABEL_ES[st], color })
+    setProp(s.w.score, hmUI.prop.TEXT, String(r.score))
+    setProp(s.w.state, hmUI.prop.MORE, { text: STATE_LABEL_ES[st], color })
 
     // Alertas de FC anómala (bienestar, no diagnóstico)
     s.samples.push({ t: now, hr, moving: s.moving })
-    s.samples = s.samples.filter((p) => now - p.t <= SAMPLE_BUFFER_MS)
+    while (s.samples.length && now - s.samples[0].t > SAMPLE_BUFFER_MS) s.samples.shift()
     // Si hay alerta, ocupa el lugar de la frase de ayuda, en rojo.
     const alerts = detectAlerts(s.samples)
-    s.w.tip.setProperty(
+    setProp(s.w.tip, 
       hmUI.prop.MORE,
       alerts.length
         ? { text: `Atención: ${ALERT_TEXT_ES[alerts[0].type]}`, color: COLORS.danger }
@@ -450,5 +519,7 @@ Page({
     try {
       hmSetting.setBrightScreenCancel()
     } catch (e) {}
+    releaseSwipe(this.state.swipe)
+    clearProps()
   },
 })

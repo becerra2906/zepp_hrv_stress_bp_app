@@ -1,9 +1,10 @@
 import { W, scale, top } from '../../utils/device.js'
 import { COLORS } from '../../utils/theme.js'
 import { label, pill, bottomPad } from '../../utils/ui.js'
-import { addBpReading, getDays, getAllBpReadings } from '../../utils/data.js'
+import { addBpReading, getDays, getAllBpReadings, invalidateDays } from '../../utils/data.js'
 import { validateReading, classifyBp, derivedBp, BP_LABEL_ES } from '../../lib/bp.js'
 import { trainPersonalBpModel, evaluateBpAnomaly } from '../../lib/bpModel.js'
+import { swipeBackToMain, releaseSwipe } from '../../utils/nav.js'
 
 // Coordenadas del lienzo "Activación — UI T-Rex 2", artboard 2 · Registrar presión (454 px).
 const T = (v) => top(v, 34)
@@ -37,6 +38,7 @@ Page({
   state: { values: {}, w: {}, model: null },
 
   onInit() {
+    invalidateDays()
     const last = lastReading()
     this.state.values = { sys: last.sys, dia: last.dia, pulse: last.pulse || 70 }
     try {
@@ -46,6 +48,7 @@ Page({
 
   build() {
     const s = this.state
+    this.state.swipe = swipeBackToMain()
     label(0, T(62), W, scale(40), 'Presión arterial', scale(30))
     label(CX - scale(160), T(104), scale(320), scale(28), 'Copia lo que marca tu tensiómetro', scale(19), COLORS.muted)
 
@@ -114,5 +117,9 @@ Page({
     if (validateReading(v).length) return
     addBpReading({ sys: v.sys, dia: v.dia, pulse: v.pulse, t: Date.now(), src: 'watch' })
     hmApp.goBack()
+  },
+
+  onDestroy() {
+    releaseSwipe(this.state.swipe)
   },
 })

@@ -354,8 +354,8 @@ test('exportación CSV del historial', async () => {
   const lines = historyToCsv(days).split('\n')
   assert.equal(lines.length, 3)
   assert.ok(lines[0].startsWith('fecha;fc_reposo;'))
-  assert.equal(lines[1], '2026-10-30;58;34;100;50;10;2;30;45;21.5;52;118;78;2')
-  assert.equal(lines[2], '2026-10-31;;;;;;;;;;;;;0')
+  assert.equal(lines[1], '2026-10-30;58;34;100;50;10;2;30;45;21.5;52;118;78;2;;;')
+  assert.equal(lines[2], '2026-10-31;;;;;;;;;;;;;0;;;')
   assert.equal(slimHistory(days)[0].bp[0].note, undefined)
 })
 
@@ -390,4 +390,123 @@ test('perfil horario, serie semanal y tendencia', async () => {
   assert.equal(h[1], null)
   assert.equal(h[0], 0.2)
   assert.equal(h[6], 1)
+})
+
+test('preparación: línea base de FC de 90 s', async () => {
+  const { baselineFromSamples, validSpo2 } = await import('../lib/readiness.js')
+  // Primeros 25 s altos (asentamiento) se descartan; luego 60 s alrededor de 58
+  const samples = []
+  for (let s = 0; s < 90; s++) samples.push({ t: s * 1000, hr: s < 25 ? 75 : s % 2 ? 57 : 59 })
+  const b = baselineFromSamples(samples)
+  assert.equal(b.valid, true)
+  assert.equal(b.hr, 57) // 33 muestras de 57 y 32 de 59
+  assert.equal(b.n, 65)
+  assert.equal(baselineFromSamples(samples, { steps: 40 }).reason, 'moved')
+  assert.equal(baselineFromSamples(samples.slice(0, 30)).reason, 'few_samples')
+  assert.equal(validSpo2(0), false)
+  assert.equal(validSpo2(94), true)
+})
+
+test('preparación: decisión del día frente a tu historia', async () => {
+  const { dayVsBaseline, readinessFromHistory } = await import('../lib/readiness.js')
+  assert.equal(dayVsBaseline([60, 60, 60], 70, { higherIsBetter: false }).status, 'insufficient')
+  const prior = [58, 60, 59, 61, 60, 59, 60]
+  assert.equal(dayVsBaseline(prior, 66, { higherIsBetter: false, minSd: 1.5 }).status, 'worse')
+  assert.equal(dayVsBaseline(prior, 60, { higherIsBetter: false, minSd: 1.5 }).status, 'normal')
+
+  const mk = (i, extra = {}) =>
+    Object.assign({ date: `2026-10-${String(10 + i).padStart(2, '0')}`, morningHr: 60 + (i % 2), rhr: 52 + (i % 2), hrvProxy: 40 + (i % 3), morningSpo2: 94 }, extra)
+  const past = Array.from({ length: 10 }, (_, i) => mk(i))
+  const date = '2026-10-31'
+  assert.equal(readinessFromHistory(past.concat([{ date, morningHr: 60, rhr: 52, hrvProxy: 41, morningSpo2: 94 }]), date).tag, 'go')
+  assert.equal(readinessFromHistory(past.concat([{ date, morningHr: 68, rhr: 52, hrvProxy: 41 }]), date).tag, 'easy')
+  const bad = readinessFromHistory(past.concat([{ date, morningHr: 68, rhr: 58, hrvProxy: 30 }]), date)
+  assert.equal(bad.tag, 'rest')
+  assert.equal(bad.signals.find((s) => s.key === 'hrv').status, 'worse')
+  // Sin historia: calibrando
+  assert.equal(readinessFromHistory([{ date, morningHr: 60 }], date).tag, 'calibrating')
+  // HRV usa RMSSD medido si hoy lo hay (no se mezcla con el proxy)
+  const r = readinessFromHistory(past.concat([{ date, morningHr: 60, rmssd: 45 }]), date)
+  assert.equal(r.signals.find((s) => s.key === 'hrv').status, 'insufficient')
+})
+
+test('pronóstico de activación por hora', async () => {
+  const { forecastDay, expectedPeak, compareToForecast } = await import('../lib/forecast.js')
+  const hourly = (peak) => Array.from({ length: 24 }, (_, h) => (h < 6 ? 10 : h === 15 ? peak : 30))
+  // Oct 2026: 24 = sábado, 31 = sábado
+  const days = [
+    { date: '2026-10-25', hourly: hourly(60) },
+    { date: '2026-10-26', hourly: hourly(70) },
+    { date: '2026-10-27', hourly: hourly(80) },
+    { date: '2026-10-31', hourly: hourly(99) }, // hoy: no entra
+  ]
+  const f = forecastDay(days, { date: '2026-10-31' })
+  assert.equal(f.ready, true)
+  assert.equal(f.days, 3)
+  assert.deepEqual([f.hours[15].expected, f.hours[15].low, f.hours[15].high], [70, 65, 75])
+  assert.equal(f.hours[3].expected, 10)
+  assert.equal(expectedPeak(f, 10).hour, 15)
+  assert.equal(expectedPeak(f, 16).hour, 16)
+
+  // Desplazamiento por preparación solo en vigilia (7–22 h)
+  const shifted = forecastDay(days, { date: '2026-10-31', shift: 8 })
+  assert.equal(shifted.hours[15].expected, 78)
+  assert.equal(shifted.hours[3].expected, 10)
+
+  // Pocos días: sin pronóstico
+  assert.equal(forecastDay(days.slice(0, 2), { date: '2026-10-31' }).ready, false)
+
+  const profile = Array.from({ length: 24 }, (_, h) => ({ hour: h, score: h === 15 ? 90 : null, minutes: h === 15 ? 60 : 0 }))
+  assert.deepEqual(compareToForecast(f, profile, 15), { hour: 15, actual: 90, expected: 70, status: 'above' })
+  assert.equal(compareToForecast(f, profile, 10), null)
+})
+
+test('preparación: estado de la medición de SpO2 por retcode', async () => {
+  const { spo2Status } = await import('../lib/readiness.js')
+  assert.equal(spo2Status(2, 95), 'success')
+  assert.equal(spo2Status(2, 0), 'failed') // éxito sin valor plausible
+  assert.equal(spo2Status(8, 88), 'success') // valor bajo sigue siendo un resultado (altitud)
+  assert.equal(spo2Status(1, 97), 'measuring')
+  assert.equal(spo2Status(0, 0), 'measuring') // estado inicial
+  assert.equal(spo2Status(undefined, undefined), 'measuring')
+  assert.equal(spo2Status(4, 0), 'not_worn')
+  assert.equal(spo2Status(7, 0), 'bad_signal')
+  assert.equal(spo2Status(5, 0), 'failed')
+})
+
+test('historial: caché en memoria, sin escrituras repetidas y perfil horario solo reciente', async () => {
+  // hmFS falso en memoria que cuenta lecturas y escrituras
+  const files = {}
+  const io = { reads: 0, writes: 0 }
+  let open = null
+  globalThis.hmFS = {
+    O_RDONLY: 0, O_CREAT: 1, O_RDWR: 2, O_TRUNC: 4, SEEK_SET: 0,
+    stat: (n) => (files[n] ? [{ size: files[n].byteLength }, 0] : [null, -1]),
+    open: (n) => (open = n),
+    seek: () => {},
+    read: (f, buf) => { io.reads++; new Uint8Array(buf).set(new Uint8Array(files[f])) },
+    write: (f, buf) => { io.writes++; files[f] = buf.slice(0) },
+    close: () => {},
+  }
+  const { getDays, upsertDay, invalidateDays } = await import('../utils/data.js')
+  invalidateDays()
+  upsertDay('2026-10-31', { rhr: 55 })
+  assert.equal(io.writes, 1)
+  upsertDay('2026-10-31', { rhr: 55 }) // mismo valor: no reescribe
+  assert.equal(io.writes, 1)
+  upsertDay('2026-10-31', { rhr: 56 })
+  assert.equal(io.writes, 2)
+  getDays(); getDays()
+  assert.equal(io.reads, 0) // todo desde la caché
+  invalidateDays()
+  assert.equal(getDays()[0].rhr, 56)
+  assert.equal(io.reads, 1)
+  // 40 días con perfil horario: solo los últimos 35 lo conservan
+  for (let i = 0; i < 40; i++) {
+    const d = new Date(2026, 8, 1 + i) // 1-sep … 10-oct
+    upsertDay(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`, { hourly: [1] })
+  }
+  const days = getDays()
+  assert.equal(days.filter((d) => d.hourly).length, 35 - 1) // el 31-oct (sin hourly) es el más reciente
+  delete globalThis.hmFS
 })

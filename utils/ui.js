@@ -40,6 +40,27 @@ export function pill(x, y, w, h, value, size, onClick, kind = 'control', onLongP
   return hmUI.createWidget(hmUI.widget.BUTTON, opts)
 }
 
+// Último valor puesto en cada widget: redibujar cuesta en el reloj, así que solo se llama a
+// setProperty cuando el valor cambia (las barras y textos se refrescan con los mismos datos casi siempre).
+const lastProps = new Map()
+
+export function setProp(widget, prop, value) {
+  const key = typeof value === 'object' ? JSON.stringify(value) : String(value)
+  let slot = lastProps.get(widget)
+  if (!slot) {
+    slot = {}
+    lastProps.set(widget, slot)
+  }
+  if (slot[prop] === key) return
+  slot[prop] = key
+  widget.setProperty(prop, value)
+}
+
+/** Llamar en onDestroy: los widgets de la página ya no existen. */
+export function clearProps() {
+  lastProps.clear()
+}
+
 /** Relleno invisible al final para poder desplazar todo el contenido en pantallas redondas. */
 export function bottomPad(y, h) {
   hmUI.createWidget(hmUI.widget.FILL_RECT, { x: 0, y, w: 1, h, color: COLORS.bg })

@@ -31,7 +31,8 @@ export const LAYOUT = {
     headerY: T(870), x: COL_X, y: T(906), w: COL_W, h: scale(62), gap: scale(8), pad: scale(14), radius: scale(20),
     sizeLabel: scale(16), sizeValue: scale(22), barW: scale(20), barGap: scale(8), barMaxH: scale(44), labelSize: scale(14),
   },
-  bpButton: { x: CX - scale(160), y: T(1146), w: scale(320), h: scale(66), size: scale(24) },
-  insightsButton: { x: CX - scale(160), y: T(1224), w: scale(320), h: scale(66), size: scale(24) },
+  readinessButton: { x: CX - scale(160), y: T(1146), w: scale(320), h: scale(66), size: scale(24) },
+  bpButton: { x: CX - scale(160), y: T(1224), w: scale(320), h: scale(66), size: scale(24) },
+  insightsButton: { x: CX - scale(160), y: T(1302), w: scale(320), h: scale(66), size: scale(24) },
   bottomPad: scale(120),
 }

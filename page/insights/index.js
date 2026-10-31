@@ -1,8 +1,9 @@
 import { W, scale, top, COL_X, COL_W } from '../../utils/device.js'
 import { COLORS } from '../../utils/theme.js'
 import { label, pill, card, bottomPad } from '../../utils/ui.js'
-import { getDays, addHrvReading, dateKey } from '../../utils/data.js'
+import { getDays, addHrvReading, dateKey, invalidateDays } from '../../utils/data.js'
 import { computeRelationships, describeCorrelationEs } from '../../lib/insights.js'
+import { swipeBackToMain, releaseSwipe } from '../../utils/nav.js'
 
 // Coordenadas del lienzo "Activación — UI T-Rex 2", artboard 3 · Relaciones y HRV (454 px).
 const T = (v) => top(v, 34)
@@ -44,6 +45,7 @@ Page({
   },
 
   onInit() {
+    invalidateDays()
     const days = getDays()
     this.state.rmssdInput = lastRmssd(days)
     try {
@@ -55,6 +57,7 @@ Page({
 
   build() {
     const s = this.state
+    this.state.swipe = swipeBackToMain()
     label(0, T(62), W, scale(40), 'Tu cuerpo hoy', scale(30))
 
     // 1. Presión estimada por el modelo personal
@@ -160,5 +163,9 @@ Page({
       })
       row.strength.setProperty(hmUI.prop.TEXT, d.strength)
     })
+  },
+
+  onDestroy() {
+    releaseSwipe(this.state.swipe)
   },
 })

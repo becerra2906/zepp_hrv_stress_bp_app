@@ -30,6 +30,16 @@ export const COLORS = {
     stage2: 0xff453a,
     crisis: 0xff2d55,
   },
+  // Preparación: color de la etiqueta del día
+  readiness: {
+    go: 0x34c759,
+    easy: 0xff9f0a,
+    rest: 0xff453a,
+    calibrating: 0x9a9a9a,
+  },
+  // Pronóstico de "Tu día": rango probable (detrás de la barra) y marca del valor esperado
+  forecastBand: 0x343434,
+  forecastMark: 0xc8c8c8,
   // Etiqueta de categoría de PA: fondo de color + texto oscuro/claro legible
   bpChip: {
     normal: { bg: 0x34c759, fg: 0x001a07 },

@@ -48,17 +48,18 @@ zpkd1://raw.githubusercontent.com/becerra2906/zepp_hrv_stress_bp_app/main/releas
 
 ```text
 app.json                 Configuración Zepp OS v2 (API 1.0; targets trex2/GTR 3, GTR 3 Pro y GTS 3)
-page/home/               Pantalla "Ahora": anillo de activación, FC en vivo, estrés, FC reposo, alertas (layout.js redonda/cuadrada)
+page/home/               Pantalla "Ahora": anillo de activación, FC en vivo, estrés, FC reposo, alertas y "Tu día" con pronóstico (layout.js redonda/cuadrada)
+page/readiness/          Preparación: 90 s de FC sentado + SpO2 puntual → Adelante / Día suave / Descansa
 page/bp/                 Registro de presión arterial en el reloj + detección de anomalías frente al modelo
 page/insights/           Pantalla "Relaciones y HRV": PA estimada, registro HRV diaria y correlaciones Spearman
 app-side/index.js        Side Service en el teléfono: sincronización BLE entre settingsStorage y el reloj
 setting/index.js         App de Ajustes en el teléfono: ingreso individual de PA, importador CSV/MAPA, HRV y perfil
 lib/                     Librería de algoritmos fisiológicos y estadísticos en JS puro (sin dependencias externas)
-utils/                   Almacenamiento hmFS, pantalla/escala, series históricas, sincronización y paleta de colores
+utils/                   Almacenamiento hmFS, pantalla/escala, series históricas, sincronización, gestos (nav.js) y paleta de colores
 shared/                  MessageBuilder oficial de Zepp OS 1.0 (BLE reloj ↔ Side Service) y polyfills
 release/                 Paquete .zpk compilado para Amazfit T-Rex 2 y código QR en PNG
 scripts/                 build-preview.mjs (ZPK del T-Rex 2), make-icon.mjs (iconos por target) y make-qr.mjs
-test/                    Suite de 23 pruebas unitarias automatizadas (node --test)
+test/                    Suite de 28 pruebas unitarias automatizadas (node --test)
 ```
 
 ---
@@ -75,6 +76,8 @@ test/                    Suite de 23 pruebas unitarias automatizadas (node --tes
 | [`stats.js`](./lib/stats.js) | **Correlación no paramétrica de Spearman ($\rho$):** manejo de empates por rangos promediados y soporte de desfase temporal (*lag* de 0 a 2 días). |
 | [`insights.js`](./lib/insights.js) | **Motor multivariable:** cruza series diarias alineadas (Carga de estrés $\rightarrow$ PAS, FC reposo $\rightarrow$ PAS, HRV $\ln\text{RMSSD} \rightarrow$ PAS, HRV $\leftrightarrow$ Estrés y Estrés hoy $\rightarrow$ FC reposo mañana). |
 | [`alerts.js`](./lib/alerts.js) | **Alertas de FC anómala:** taquicardia en reposo sostenida ($>100$ lpm por $\ge 10$ min sin movimiento), bradicardia en vigilia ($<40$ lpm) y saltos bruscos ($\ge 30$ lpm en $\le 60$ s sin actividad). |
+| [`readiness.js`](./lib/readiness.js) | **Preparación:** mediana de la FC sentado (90 s, se descartan los primeros 25 s; inválido si das >15 pasos) y SpO2 puntual. Cada señal (FC sentado, FC noche, HRV, SpO2 con medio peso) se compara con tus últimos 30 días (±1 DE): 2 señales peores → *Descansa*, 1 → *Día suave*, si no *Adelante*; con menos de 2 señales con 5 días de historia → *Calibrando*. |
+| [`forecast.js`](./lib/forecast.js) | **Pronóstico de activación por hora:** mediana de las últimas 4 semanas por hora (mezclada con el mismo día de la semana si hay ≥2), rango probable P25–P75; necesita ≥3 días con perfil horario. Una preparación *Día suave*/*Descansa* sube el pronóstico de vigilia +4/+8 puntos (heurística). |
 | [`hrv.js`](./lib/hrv.js) | **Análisis de intervalos RR:** filtrado de artefactos por mediana local (umbral Kubios 250 ms), $\text{RMSSD}$, $\ln(\text{RMSSD})$, $\text{SDNN}$, $\text{pNN50}$, Poincaré $\text{SD1}/\text{SD2}$ e índice de estrés de Baevsky ($\sqrt{\text{SI}}$). |
 
 ---
@@ -83,7 +86,7 @@ test/                    Suite de 23 pruebas unitarias automatizadas (node --tes
 
 ```bash
 npm install                  # Instala dependencias (@zeppos/zeus-cli y @zeppos/device-types)
-npm test                     # Ejecuta las 23 pruebas unitarias (node --test)
+npm test                     # Ejecuta las 28 pruebas unitarias (node --test)
 node scripts/build-preview.mjs  # Compila el .zab y lo copia (más el ZPK del T-Rex 2) a release/
 node scripts/make-qr.mjs     # Regenera el código QR en release/qr-trex2.png
 npx zeus preview             # Sube a Zepp y muestra un QR oficial (requiere `npx zeus login`)

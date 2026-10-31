@@ -5,8 +5,8 @@
     "appName": "Activacion",
     "appType": "app",
     "version": {
-      "code": 6,
-      "name": "0.5.0"
+      "code": 7,
+      "name": "0.6.0"
     },
     "icon": "icon.png",
     "vender": "aleja",
@@ -25,7 +25,7 @@
     "trex2": {
       "module": {
         "page": {
-          "pages": ["page/home/index", "page/bp/index", "page/insights/index"]
+          "pages": ["page/home/index", "page/readiness/index", "page/bp/index", "page/insights/index"]
         },
         "app-side": {
           "path": "app-side/index"
@@ -45,7 +45,7 @@
     "gtr3-pro": {
       "module": {
         "page": {
-          "pages": ["page/home/index", "page/bp/index", "page/insights/index"]
+          "pages": ["page/home/index", "page/readiness/index", "page/bp/index", "page/insights/index"]
         },
         "app-side": {
           "path": "app-side/index"
@@ -63,7 +63,7 @@
     "gts3": {
       "module": {
         "page": {
-          "pages": ["page/home/index", "page/bp/index", "page/insights/index"]
+          "pages": ["page/home/index", "page/readiness/index", "page/bp/index", "page/insights/index"]
         },
         "app-side": {
           "path": "app-side/index"
