@@ -8,13 +8,13 @@ Aplicación de bienestar para relojes **Amazfit (Zepp OS 2.0+)** que estima en t
 
 ## Instalación Rápida por Código QR (Amazfit T-Rex 2)
 
-El paquete compilado en modo `preview` para **Amazfit T-Rex 2** (`deviceSource` 418 / 419, pantalla redonda 454×454 px) se encuentra en [`release/activacion-trex2-v2.zpk`](./release/activacion-trex2-v2.zpk).
+El paquete compilado en modo `preview` para **Amazfit T-Rex 2** (`deviceSource` 418 / 419, pantalla redonda 454×454 px) se encuentra en [`release/activacion-trex2-v3.zpk`](./release/activacion-trex2-v3.zpk).
 
 ![Código QR de instalación para Amazfit T-Rex 2](./release/qr-trex2.png)
 
 **URL del protocolo Zepp Developer Mode:**
 ```text
-zpkd1://raw.githubusercontent.com/becerra2906/zepp_hrv_stress_bp_app/main/release/activacion-trex2-v2.zpk
+zpkd1://raw.githubusercontent.com/becerra2906/zepp_hrv_stress_bp_app/main/release/activacion-trex2-v3.zpk
 ```
 
 ### Pasos para instalar en el reloj:

@@ -65,7 +65,7 @@ export function renderQrPng(text, outPath, { scale = 10, margin = 4 } = {}) {
 
 const url =
   process.argv[2] ||
-  'zpkd1://raw.githubusercontent.com/becerra2906/zepp_hrv_stress_bp_app/main/release/activacion-trex2-v2.zpk'
+  'zpkd1://raw.githubusercontent.com/becerra2906/zepp_hrv_stress_bp_app/main/release/activacion-trex2-v3.zpk'
 const customOut = process.argv[3]
 
 if (customOut) {
@@ -80,7 +80,7 @@ if (customOut) {
   )
   renderQrPng(
     url,
-    'C:/Users/aleja/.gemini/antigravity/brain/2a9f27db-070d-4492-8330-9ca9f7ae9b6e/qr-trex2-v2.png'
+    'C:/Users/aleja/.gemini/antigravity/brain/2a9f27db-070d-4492-8330-9ca9f7ae9b6e/qr-trex2-v3.png'
   )
   console.log('QR generated:', url, res1)
 }
