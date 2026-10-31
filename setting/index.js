@@ -1,6 +1,7 @@
 import { parseMapaCsv, trainPersonalBpModel } from '../lib/bpModel.js'
 import { classifyBp, BP_LABEL_ES } from '../lib/bp.js'
 import { hrMaxTanaka } from '../lib/restingHr.js'
+import { historyToCsv, dayBpSummary } from '../lib/export.js'
 
 /**
  * Página de Ajustes y Gestión de Datos en el teléfono (Zepp App).
@@ -14,6 +15,82 @@ function readJson(storage, key, fallback) {
   } catch (e) {
     return fallback
   }
+}
+
+const fmt = (v, unit = '') => (typeof v === 'number' ? `${Math.round(v * 10) / 10}${unit}` : '–')
+
+function avg(days, key) {
+  const vals = days.map((d) => d[key]).filter((v) => typeof v === 'number')
+  return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null
+}
+
+/** Sección de historial: promedio de 7 días, lista de días (más reciente primero) y CSV para copiar. */
+function historySection(store, watchHistory, days, csvExport) {
+  if (!days.length) {
+    return [
+      Text(
+        { style: { fontSize: '13px', color: '#6e6e73' } },
+        'Aún no hay datos del reloj. Abre la app en el reloj con el teléfono cerca: el historial llega solo y se actualiza cada 15 min mientras está abierta.'
+      ),
+    ]
+  }
+  const last7 = days.slice(-7)
+  const synced = watchHistory.at ? new Date(watchHistory.at).toLocaleString() : '–'
+  const recent = days.slice(-30).reverse()
+  return [
+    Text({ style: { fontSize: '12px', color: '#6e6e73', marginBottom: '8px' } }, `Última sincronización: ${synced}`),
+    View({ style: { padding: '10px 12px', borderRadius: '8px', backgroundColor: '#ffffff', marginBottom: '10px' } }, [
+      Text({ style: { fontSize: '13px', fontWeight: 'bold', color: '#1c1c1e', marginBottom: '4px' } }, 'Promedio últimos 7 días'),
+      Text(
+        { style: { fontSize: '13px', color: '#1c1c1e' } },
+        `FC reposo ${fmt(avg(last7, 'rhr'), ' lpm')} · Carga de estrés ${fmt(avg(last7, 'stressLoad'))} · HRV ${fmt(avg(last7, 'rmssd'), ' ms')} · Proxy noche ${fmt(avg(last7, 'hrvProxy'), ' ms')}`
+      ),
+    ]),
+    View(
+      {},
+      recent.map((d) => {
+        const bp = dayBpSummary(d)
+        const bpTxt = bp ? `PA ${bp.sys}/${bp.dia} (${bp.n} ${bp.n === 1 ? 'toma' : 'tomas'})` : 'Sin PA'
+        return View({ style: { padding: '8px 0', borderBottom: '1px solid #e5e5ea' } }, [
+          Text({ style: { fontSize: '14px', fontWeight: 'bold', color: '#1c1c1e' } }, d.date),
+          Text(
+            { style: { fontSize: '12px', color: '#3a3a3c' } },
+            `FC reposo ${fmt(d.rhr, ' lpm')} · Estrés ${fmt(d.stressLoad)} · ${bpTxt}`
+          ),
+          Text(
+            { style: { fontSize: '12px', color: '#6e6e73' } },
+            `HRV ${fmt(d.rmssd, ' ms')} · Proxy noche ${fmt(d.hrvProxy, ' ms')} · FC noche ${fmt(d.nightHr, ' lpm')}`
+          ),
+        ])
+      })
+    ),
+    Text(
+      { style: { fontSize: '11px', color: '#8e8e93', marginTop: '8px' } },
+      'Proxy noche: variación de la FC minuto a minuto en la hora más tranquila entre 00:00 y 06:00. No es RMSSD real; úsalo para ver tu tendencia, no para compararlo con otras apps.'
+    ),
+    Button({
+      label: csvExport ? 'Actualizar CSV' : 'Exportar historial (CSV)',
+      style: { marginTop: '10px', backgroundColor: '#007aff', color: '#ffffff' },
+      onClick: () => {
+        store.setItem('csvExport', historyToCsv(days))
+        store.setItem('statusMessage', `CSV generado con ${days.length} días. Cópialo del cuadro de abajo.`)
+      },
+    }),
+    csvExport
+      ? View({ style: { marginTop: '8px' } }, [
+          Text(
+            { style: { fontSize: '12px', color: '#6e6e73', marginBottom: '4px' } },
+            'Toca el cuadro, selecciona todo y copia. Pégalo en un correo, Notas o una hoja de cálculo (separador ";").'
+          ),
+          TextInput({ label: 'CSV del historial', value: csvExport, onChange: () => {} }),
+          Button({
+            label: 'Ocultar CSV',
+            style: { marginTop: '6px', backgroundColor: '#8e8e93', color: '#ffffff' },
+            onClick: () => store.setItem('csvExport', ''),
+          }),
+        ])
+      : null,
+  ]
 }
 
 AppSettingsPage({
@@ -31,6 +108,9 @@ AppSettingsPage({
     const readings = readJson(store, 'bpReadings', [])
     const hrvReadings = readJson(store, 'hrvReadings', [])
     const message = store.getItem('statusMessage') || ''
+    const watchHistory = readJson(store, 'watchHistory', {})
+    const historyDays = Array.isArray(watchHistory.days) ? watchHistory.days : []
+    const csvExport = store.getItem('csvExport') || ''
 
     const updateDraft = (patch) => {
       store.setItem('draftForm', JSON.stringify(Object.assign({}, draft, patch)))
@@ -87,6 +167,9 @@ AppSettingsPage({
             : 'Agrega al menos 5–10 mediciones en distintos momentos del día o importa tu estudio MAPA para activar el ajuste.'
         ),
       ]),
+
+      // SECCIÓN 1b: Historial diario que manda el reloj + exportación
+      Section({ title: `Historial del reloj (${historyDays.length} días)` }, historySection(store, watchHistory, historyDays, csvExport)),
 
       // SECCIÓN 2: Agregar lectura individual de PA
       Section({ title: 'Nueva medición individual (Tensiómetro)' }, [

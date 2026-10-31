@@ -1,4 +1,5 @@
-import { mergeSyncedPayload } from './data.js'
+import { mergeSyncedPayload, getDays } from './data.js'
+import { slimHistory } from '../lib/export.js'
 
 /**
  * Sincronización ligera y tolerante a fallos con el Side Service del teléfono
@@ -15,6 +16,17 @@ export function requestPhoneSync(onSynced) {
         mergeSyncedPayload(payload)
         if (typeof onSynced === 'function') onSynced(payload)
       })
+      .catch(() => {})
+  } catch (e) {}
+}
+
+/** Envía el historial diario del reloj al teléfono para verlo y exportarlo en Ajustes. */
+export function pushHistoryToPhone() {
+  try {
+    const { messageBuilder } = getApp()._options.globalData
+    if (!messageBuilder) return
+    messageBuilder
+      .request({ method: 'PUSH_HISTORY', params: { at: Date.now(), days: slimHistory(getDays()) } }, { timeout: 15000 })
       .catch(() => {})
   } catch (e) {}
 }

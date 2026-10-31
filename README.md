@@ -8,11 +8,22 @@ Aplicación de bienestar para relojes **Amazfit con Zepp OS 1.0** (T-Rex 2, GTR 
 
 ## Instalación Rápida por Código QR (Amazfit T-Rex 2)
 
-El T-Rex 2 corre **Zepp OS 1.0** (API 1.0), así que la app usa `configVersion: "v2"` y las APIs globales `hmUI` / `hmSensor` / `hmFS` / `hmApp`. Un paquete de Zepp OS 2.0+ (`configVersion: "v3"`, módulos `@zos/*`) no se instala en el T-Rex 2 y da *"failed to unzip the app"*.
+El T-Rex 2 corre **Zepp OS 1.0** (API 1.0), así que la app usa `configVersion: "v2"` y las APIs globales `hmUI` / `hmSensor` / `hmFS` / `hmApp`.
 
-El QR apunta al bundle compilado en modo `preview` [`release/activacion-os1.zab`](./release/activacion-os1.zab). Es el mismo formato que sube `zeus preview`: un `.zab` con `manifest.json` desde el que la app Zepp elige el ZPK de tu reloj (T-Rex 2 = `deviceSource` 418 / 419, 454×454 px). Apuntar el QR a un `.zpk` suelto también da *"failed to unzip package"*, porque no lleva `manifest.json`. [`release/activacion-trex2.zpk`](./release/activacion-trex2.zpk) queda solo como referencia.
+### Instalación recomendada: `zeus preview` (probado en T-Rex 2)
+```bash
+npx zeus login               # una sola vez, misma cuenta que la app Zepp del teléfono
+npx zeus preview -t trex2    # sube a Zepp y muestra un QR oficial (válido ~7 días)
+```
+Escanea el QR desde la app Zepp (**Modo Desarrollador → Mini Programa → Escanear**).
 
-> ⏱️ Los paquetes `preview` caducan **48 h** después de compilarse (`packageInfo.expiredTime`). Si ya pasó ese tiempo, regenera con `node scripts/build-preview.mjs` y sube el cambio. La vía más fiable es `npx zeus login` y luego `npx zeus preview` (elige el target `trex2`), que sube el paquete a Zepp y muestra un QR oficial.
+> ⚠️ **"failed to unzip the app / package"** tiene tres causas conocidas en este proyecto:
+> 1. **`appId` ya usado por otra app:** con `1000001` la instalación fallaba siempre. Ahora es `27992` (de pruebas). Para publicar, registra la app en [console.zepp.com](https://console.zepp.com/) y usa el `appId` asignado.
+> 2. Un paquete de Zepp OS 2.0+ (`configVersion: "v3"`, módulos `@zos/*`) no se instala en el T-Rex 2.
+> 3. Un `.zpk` suelto en el QR, sin el `.zab` con `manifest.json`.
+
+### Alternativa (sin verificar): QR alojado en GitHub
+El QR de abajo apunta al bundle `preview` [`release/activacion-os1.zab`](./release/activacion-os1.zab) en GitHub. Este método nunca se ha visto funcionar: la descarga oficial de Zepp exige el token de tu cuenta. Además, los paquetes `preview` caducan **48 h** después de compilarse (regenera con `node scripts/build-preview.mjs`). [`release/activacion-trex2.zpk`](./release/activacion-trex2.zpk) queda solo como referencia.
 
 ![Código QR de instalación para Amazfit T-Rex 2](./release/qr-trex2.png)
 
@@ -47,7 +58,7 @@ utils/                   Almacenamiento hmFS, pantalla/escala, series histórica
 shared/                  MessageBuilder oficial de Zepp OS 1.0 (BLE reloj ↔ Side Service) y polyfills
 release/                 Paquete .zpk compilado para Amazfit T-Rex 2 y código QR en PNG
 scripts/                 build-preview.mjs (ZPK del T-Rex 2), make-icon.mjs (iconos por target) y make-qr.mjs
-test/                    Suite de 19 pruebas unitarias automatizadas (node --test)
+test/                    Suite de 23 pruebas unitarias automatizadas (node --test)
 ```
 
 ---
@@ -72,7 +83,7 @@ test/                    Suite de 19 pruebas unitarias automatizadas (node --tes
 
 ```bash
 npm install                  # Instala dependencias (@zeppos/zeus-cli y @zeppos/device-types)
-npm test                     # Ejecuta las 19 pruebas unitarias (node --test)
+npm test                     # Ejecuta las 23 pruebas unitarias (node --test)
 node scripts/build-preview.mjs  # Compila el .zab y lo copia (más el ZPK del T-Rex 2) a release/
 node scripts/make-qr.mjs     # Regenera el código QR en release/qr-trex2.png
 npx zeus preview             # Sube a Zepp y muestra un QR oficial (requiere `npx zeus login`)
@@ -84,7 +95,7 @@ npx zeus dev                 # Ejecuta en el simulador oficial de Zepp OS
 ## Guía para Publicar y Monetizar en Zepp App Store
 
 1. **Registro y `appId`:**
-   - Crea una cuenta en [Zepp Open Platform Console](https://console.zepp.com/), registra un nuevo *Mini Program* y reemplaza `"appId": 1000001` en [`app.json`](./app.json) por el `appId` asignado.
+   - Crea una cuenta en [Zepp Open Platform Console](https://console.zepp.com/), registra un nuevo *Mini Program* y reemplaza el `"appId": 27992` de pruebas en [`app.json`](./app.json) por el `appId` asignado. No uses un `appId` que ya tenga otra app: la instalación falla con *"failed to unzip"*.
 2. **Revisión de Salud y Bienestar:**
    - Incluye en la descripción de la tienda el aviso explícito de que es una herramienta de bienestar y no de diagnóstico médico, y justifica el uso de los permisos `heart_rate`, `stress` y `step`.
 3. **Estrategia de Monetización:**

@@ -23,7 +23,7 @@ import {
   evaluateBpAnomaly,
   parseMapaCsv,
 } from '../lib/bpModel.js'
-import { computeRelationships, formatCorrelationEs } from '../lib/insights.js'
+import { computeRelationships, formatCorrelationEs, describeCorrelationEs } from '../lib/insights.js'
 
 const close = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} ≉ ${b}`)
 
@@ -314,3 +314,80 @@ test('modelo PA: gestión e integración de lecturas individuales', () => {
 })
 
 
+
+test('correlaciones en lenguaje cotidiano', () => {
+  const none = describeCorrelationEs({ id: 'hrv_stress', label: 'x', result: { rho: null, n: 5 } })
+  assert.equal(none.level, 'none')
+  assert.equal(none.strength, 'faltan 9 días')
+  const neg = describeCorrelationEs({ id: 'hrv_stress', label: 'x', result: { rho: -0.62, n: 20, significant: true } })
+  assert.equal(neg.text, 'HRV alta, menos estrés')
+  assert.equal(neg.strength, 'relación fuerte')
+  const weak = describeCorrelationEs({ id: 'stress_sys', label: 'x', result: { rho: 0.2, n: 20, significant: false } })
+  assert.equal(weak.text, 'Más estrés, presión más alta')
+  assert.equal(weak.strength, 'débil, sin confirmar')
+})
+
+test('proxy de HRV nocturno desde FC por minuto', async () => {
+  const { hrvProxyFromDay } = await import('../lib/hrvProxy.js')
+  assert.equal(hrvProxyFromDay([]), null)
+  // Noche estable (50 lpm) vs noche que oscila 50/54 lpm: el proxy debe subir con la oscilación
+  const flat = Array.from({ length: 480 }, () => 50)
+  const wavy = Array.from({ length: 480 }, (_, i) => (i % 2 ? 54 : 50))
+  const a = hrvProxyFromDay(flat)
+  const b = hrvProxyFromDay(wavy)
+  assert.equal(a.proxy, 0)
+  assert.equal(a.meanHr, 50)
+  assert.ok(b.proxy > 80 && b.proxy < 95) // |60000/54 - 60000/50| ≈ 88.9 ms
+  // Ventana más tranquila: la hora con FC media más baja
+  const day = Array.from({ length: 480 }, (_, i) => (i >= 120 && i < 180 ? 48 : 62))
+  assert.equal(hrvProxyFromDay(day).startMin, 120)
+  // Pocos datos válidos → null
+  assert.equal(hrvProxyFromDay(Array.from({ length: 480 }, (_, i) => (i % 3 ? 0 : 55))), null)
+})
+
+test('exportación CSV del historial', async () => {
+  const { historyToCsv, slimHistory } = await import('../lib/export.js')
+  const days = [
+    { date: '2026-10-30', rhr: 58, stressLoad: 34, totals: { recovery: 100, balance: 50, activation: 10, high: 2, exercise: 30 }, rmssd: 45, hrvProxy: 21.5, nightHr: 52, bp: [{ sys: 120, dia: 80, pulse: 70, t: 1, src: 'watch', note: '' }, { sys: 116, dia: 76, pulse: 68, t: 2 }] },
+    { date: '2026-10-31', bp: [] },
+  ]
+  const lines = historyToCsv(days).split('\n')
+  assert.equal(lines.length, 3)
+  assert.ok(lines[0].startsWith('fecha;fc_reposo;'))
+  assert.equal(lines[1], '2026-10-30;58;34;100;50;10;2;30;45;21.5;52;118;78;2')
+  assert.equal(lines[2], '2026-10-31;;;;;;;;;;;;;0')
+  assert.equal(slimHistory(days)[0].bp[0].note, undefined)
+})
+
+test('perfil horario, serie semanal y tendencia', async () => {
+  const { hourlyProfile, peakHour, lastDaysSeries, trendOf, barHeights } = await import('../lib/daily.js')
+  const minutes = Array.from({ length: 180 }, (_, i) => (i < 60 ? 55 : i < 120 ? 90 : 0))
+  const timeline = minutes.map((hr, i) =>
+    hr ? (i < 60 ? { score: 10, state: 'recovery' } : { score: 80, state: 'high' }) : null
+  )
+  const prof = hourlyProfile(minutes, timeline)
+  assert.equal(prof.length, 24)
+  assert.deepEqual([prof[0].score, prof[0].state, prof[0].meanHr], [10, 'recovery', 55])
+  assert.deepEqual([prof[1].score, prof[1].state, prof[1].meanHr], [80, 'high', 90])
+  assert.equal(prof[2].score, null)
+  assert.equal(peakHour(prof).hour, 1)
+
+  const today = new Date(2026, 9, 31)
+  const days = [
+    { date: '2026-10-25', rhr: 60 },
+    { date: '2026-10-27', rhr: 60 },
+    { date: '2026-10-29', rhr: 60 },
+    { date: '2026-10-31', rhr: 66 },
+  ]
+  const s = lastDaysSeries(days, (d) => d.rhr, 7, today)
+  assert.equal(s.length, 7)
+  assert.equal(s[0].date, '2026-10-25')
+  assert.equal(s[6].label, 'S')
+  assert.equal(s[1].value, null)
+  assert.equal(trendOf(s), 'up')
+  assert.equal(trendOf(lastDaysSeries([{ date: '2026-10-31', rhr: 60 }], (d) => d.rhr, 7, today)), 'none')
+  const h = barHeights(s)
+  assert.equal(h[1], null)
+  assert.equal(h[0], 0.2)
+  assert.equal(h[6], 1)
+})

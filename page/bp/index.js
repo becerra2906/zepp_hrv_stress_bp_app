@@ -1,17 +1,28 @@
-import { W, IS_ROUND, scale } from '../../utils/device.js'
+import { W, scale, top } from '../../utils/device.js'
 import { COLORS } from '../../utils/theme.js'
+import { label, pill, bottomPad } from '../../utils/ui.js'
 import { addBpReading, getDays, getAllBpReadings } from '../../utils/data.js'
 import { validateReading, classifyBp, derivedBp, BP_LABEL_ES } from '../../lib/bp.js'
 import { trainPersonalBpModel, evaluateBpAnomaly } from '../../lib/bpModel.js'
 
-// En pantallas redondas se deja más margen superior para no cortar contenido.
-const TOP = IS_ROUND ? scale(70) : scale(30)
+// Coordenadas del lienzo "Activación — UI T-Rex 2", artboard 2 · Registrar presión (454 px).
+const T = (v) => top(v, 34)
+const CX = Math.round(W / 2)
 
 const FIELDS = [
-  { key: 'sys', label: 'Sistólica', min: 60, max: 260 },
-  { key: 'dia', label: 'Diastólica', min: 30, max: 160 },
-  { key: 'pulse', label: 'Pulso', min: 30, max: 220 },
+  { key: 'sys', label: 'Sistólica (alta)', min: 60, max: 260 },
+  { key: 'dia', label: 'Diastólica (baja)', min: 30, max: 160 },
+  { key: 'pulse', label: 'Pulso (lpm)', min: 30, max: 220 },
 ]
+
+// Indicación corta por categoría, en lenguaje cotidiano
+const BP_HINT_ES = {
+  normal: 'Dentro del rango saludable',
+  elevated: 'Un poco por encima de lo ideal',
+  stage1: 'Vigila la tendencia esta semana',
+  stage2: 'Coméntalo con tu médico',
+  crisis: 'Repite la medición y busca atención médica',
+}
 
 function lastReading() {
   const days = getDays()
@@ -35,82 +46,67 @@ Page({
 
   build() {
     const s = this.state
-    const rowH = scale(96)
-    const btn = scale(76)
+    label(0, T(62), W, scale(40), 'Presión arterial', scale(30))
+    label(CX - scale(160), T(104), scale(320), scale(28), 'Copia lo que marca tu tensiómetro', scale(19), COLORS.muted)
 
-    hmUI.createWidget(hmUI.widget.TEXT, {
-      x: 0, y: TOP, w: W, h: scale(50),
-      text: 'Presión arterial', text_size: scale(32), color: COLORS.text,
-      align_h: hmUI.align.CENTER_H, align_v: hmUI.align.CENTER_V,
-    })
-
+    const rowH = scale(106)
+    const btnW = scale(76)
+    const btnH = scale(64)
     FIELDS.forEach((f, i) => {
-      const y = TOP + scale(60) + i * rowH
-      hmUI.createWidget(hmUI.widget.TEXT, {
-        x: 0, y, w: W, h: scale(28),
-        text: f.label, text_size: scale(22), color: COLORS.muted,
-        align_h: hmUI.align.CENTER_H, align_v: hmUI.align.CENTER_V,
-      })
-      const rowY = y + scale(26)
+      const y = T(150) + i * rowH
+      label(0, y, W, scale(26), f.label, scale(20), COLORS.muted)
+      const rowY = y + scale(28)
       const step = (delta) => {
         const v = Math.min(f.max, Math.max(f.min, s.values[f.key] + delta))
         s.values[f.key] = v
         s.w[f.key].setProperty(hmUI.prop.TEXT, String(v))
         this.renderPreview()
       }
-      hmUI.createWidget(hmUI.widget.BUTTON, {
-        x: W / 2 - scale(170), y: rowY, w: btn, h: scale(60), radius: scale(30),
-        text: '−', text_size: scale(40), normal_color: 0x262626, press_color: 0x444444,
-        click_func: () => step(-1),
-        longpress_func: () => step(-5),
-      })
-      s.w[f.key] = hmUI.createWidget(hmUI.widget.TEXT, {
-        x: W / 2 - scale(80), y: rowY, w: scale(160), h: scale(60),
-        text: String(s.values[f.key]), text_size: scale(48), color: COLORS.text,
-        align_h: hmUI.align.CENTER_H, align_v: hmUI.align.CENTER_V,
-      })
-      hmUI.createWidget(hmUI.widget.BUTTON, {
-        x: W / 2 + scale(170) - btn, y: rowY, w: btn, h: scale(60), radius: scale(30),
-        text: '+', text_size: scale(40), normal_color: 0x262626, press_color: 0x444444,
-        click_func: () => step(1),
-        longpress_func: () => step(5),
-      })
+      pill(CX - scale(170), rowY, btnW, btnH, '-', scale(40), () => step(-1), 'control', () => step(-5))
+      s.w[f.key] = label(CX - scale(80), rowY, scale(160), btnH, String(s.values[f.key]), scale(52))
+      pill(CX + scale(170) - btnW, rowY, btnW, btnH, '+', scale(40), () => step(1), 'control', () => step(5))
     })
 
-    const yPrev = TOP + scale(60) + FIELDS.length * rowH + scale(4)
-    s.w.preview = hmUI.createWidget(hmUI.widget.TEXT, {
-      x: scale(20), y: yPrev, w: W - scale(40), h: scale(60),
-      text: '', text_size: scale(22), color: COLORS.muted,
-      align_h: hmUI.align.CENTER_H, align_v: hmUI.align.CENTER_V, text_style: hmUI.text_style.WRAP,
+    // Etiqueta de categoría: rectángulo de color + texto encima
+    const chipY = T(488)
+    s.w.chipBg = hmUI.createWidget(hmUI.widget.FILL_RECT, {
+      x: CX - scale(150), y: chipY, w: scale(300), h: scale(44), radius: scale(22), color: COLORS.bpChip.normal.bg,
     })
-    hmUI.createWidget(hmUI.widget.BUTTON, {
-      x: W / 2 - scale(110), y: yPrev + scale(66), w: scale(220), h: scale(66), radius: scale(33),
-      text: 'Guardar', text_size: scale(30), normal_color: 0x1c3d5a, press_color: 0x2fa3ff,
-      click_func: () => this.saveReading(),
-    })
-    hmUI.createWidget(hmUI.widget.FILL_RECT, { x: 0, y: yPrev + scale(140), w: 1, h: scale(120), color: COLORS.bg })
+    s.w.chipText = label(CX - scale(150), chipY, scale(300), scale(44), '', scale(22), COLORS.bpChip.normal.fg)
+    s.w.hint = label(CX - scale(160), chipY + scale(50), scale(320), scale(52), '', scale(19), COLORS.muted, hmUI.align.CENTER_H, true)
+
+    const saveY = T(610)
+    pill(CX - scale(160), saveY, scale(320), scale(70), 'Guardar', scale(26), () => this.saveReading(), 'primary')
+    label(CX - scale(170), saveY + scale(80), scale(340), scale(26), 'Mantén - / + para saltar de 5 en 5', scale(17), COLORS.muted)
+    bottomPad(saveY + scale(110), scale(120))
     this.renderPreview()
   },
 
   renderPreview() {
-    const { sys, dia, pulse } = this.state.values
-    const errors = validateReading(this.state.values)
-    if (errors.length) {
-      this.state.w.preview.setProperty(hmUI.prop.MORE, { text: 'Valores no válidos', color: COLORS.danger })
+    const s = this.state
+    const { sys, dia, pulse } = s.values
+    if (validateReading(s.values).length) {
+      s.w.chipBg.setProperty(hmUI.prop.MORE, { color: COLORS.track })
+      s.w.chipText.setProperty(hmUI.prop.MORE, { text: 'Valores no válidos', color: COLORS.danger })
+      s.w.hint.setProperty(hmUI.prop.TEXT, 'La alta debe ser mayor que la baja')
       return
     }
     const cat = classifyBp(sys, dia)
-    const d = derivedBp(sys, dia)
-    let msg = `${BP_LABEL_ES[cat]} · PAM ${Math.round(d.map)} · PP ${d.pulsePressure}`
-    if (cat === 'crisis') {
-      msg = 'Rango de crisis: repite la medición y busca atención médica'
-    } else if (this.state.model) {
-      const anom = evaluateBpAnomaly({ sys, dia, hr: pulse || 70, t: Date.now() }, this.state.model)
+    const chip = COLORS.bpChip[cat]
+    s.w.chipBg.setProperty(hmUI.prop.MORE, { color: chip.bg })
+    s.w.chipText.setProperty(hmUI.prop.MORE, { text: BP_LABEL_ES[cat], color: chip.fg })
+
+    let hint = BP_HINT_ES[cat]
+    if (cat !== 'crisis' && s.model) {
+      const anom = evaluateBpAnomaly({ sys, dia, hr: pulse || 70, t: Date.now() }, s.model)
       if (anom.anomaly !== 'normal') {
-        msg += ` (${anom.anomaly === 'high' ? '▲ alta' : '▼ baja'} vs estimación)`
+        hint = anom.anomaly === 'high' ? 'Más alta de lo que esperaba tu modelo' : 'Más baja de lo que esperaba tu modelo'
       }
     }
-    this.state.w.preview.setProperty(hmUI.prop.MORE, { text: msg, color: COLORS.bp[cat] })
+    if (cat === 'normal' || cat === 'elevated') {
+      hint += ` · PAM ${Math.round(derivedBp(sys, dia).map)}`
+    }
+    s.w.hint.setProperty(hmUI.prop.TEXT, hint)
   },
 
   saveReading() {
