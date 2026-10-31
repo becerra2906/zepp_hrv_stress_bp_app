@@ -3,6 +3,7 @@ import { COLORS } from '../../utils/theme.js'
 import { label, pill, card, bottomPad, setProp, clearProps } from '../../utils/ui.js'
 import { getDays, upsertDay, dateKey, invalidateDays } from '../../utils/data.js'
 import { every, stop } from '../../utils/timer.js'
+import { load, save } from '../../utils/storage.js'
 import { swipeBackToMain, releaseSwipe } from '../../utils/nav.js'
 import {
   MEASURE_MS,
@@ -10,6 +11,7 @@ import {
   baselineFromSamples,
   validSpo2,
   spo2Status,
+  spo2IsFromToday,
   readinessFromHistory,
   READINESS_LABEL_ES,
   READINESS_TIP_ES,
@@ -44,6 +46,15 @@ const FAIL_TEXT = {
   no_hr: 'No llega la FC. Ajusta el reloj en la muñeca y repite.',
   total_timeout: 'La medición tardó demasiado. Inténtalo de nuevo.',
 }
+// Rastro de la medición de SpO2 en archivo: si el reloj cierra la app a mitad, al volver se sabe en qué
+// paso fue y se desactiva la medición manual hasta que se pida reintentarla (mantener "Empezar").
+const KEY_TRACE = 'spo2_trace'
+const KEY_BLOCKED = 'spo2_blocked'
+function trace(step) {
+  save(KEY_TRACE, { step, t: Date.now() })
+}
+const STEP_TEXT_ES = { listen: 'registrar el sensor', start: 'iniciar la medición', measuring: 'medir', stop: 'detener el sensor' }
+
 const SPO2_TEXT = {
   measuring: 'SpO2: midiendo… muñeca quieta, a la altura del corazón.',
   not_worn: 'SpO2: no detecta la muñeca. Ajusta el reloj.',
@@ -63,6 +74,9 @@ Page({
     t0: 0,
     spo2T0: 0,
     spo2PrevTime: null,
+    spo2Started: false,
+    spo2Changed: false,
+    spo2CrashStep: null,
     steps0: null,
     morningHr: null,
     spo2Value: null,
@@ -85,6 +99,14 @@ Page({
     try {
       s.stepSensor = hmSensor.createSensor(hmSensor.id.STEP)
     } catch (e) {}
+    // ¿La última medición de SpO2 quedó a medias? (la app se cerró antes de llegar a "done")
+    const last = load(KEY_TRACE, null)
+    if (last && last.step !== 'done') {
+      save(KEY_BLOCKED, { step: last.step, t: last.t })
+      save(KEY_TRACE, { step: 'done', t: Date.now() })
+    }
+    const blocked = load(KEY_BLOCKED, null)
+    s.spo2CrashStep = blocked && blocked.step ? blocked.step : null
   },
 
   build() {
@@ -108,8 +130,25 @@ Page({
       'Siéntate, apoya el brazo y respira normal. Luego mide SpO2.',
       scale(20), COLORS.soft, hmUI.align.CENTER_H, true
     )
-    s.w.start = pill(CX - scale(140), T(436), scale(280), scale(66), 'Empezar', scale(26), () => this.guard(() => this.startHr()), 'primary')
+    s.w.start = pill(
+      CX - scale(140), T(436), scale(280), scale(66), 'Empezar', scale(26),
+      () => this.guard(() => this.startHr()), 'primary',
+      () => this.guard(() => this.retrySpo2())
+    )
+    if (s.spo2CrashStep) {
+      this.setStatus(
+        `La app se cerró al ${STEP_TEXT_ES[s.spo2CrashStep] || s.spo2CrashStep} la SpO2. Se usará la lectura automática. Mantén Empezar para reintentar.`,
+        COLORS.state.activation
+      )
+    }
     bottomPad(T(510), scale(120))
+  },
+
+  /** Mantener "Empezar": vuelve a permitir la medición manual de SpO2 y arranca. */
+  retrySpo2() {
+    save(KEY_BLOCKED, null)
+    this.state.spo2CrashStep = null
+    this.startHr()
   },
 
   /** Cualquier error se muestra en pantalla en vez de dejar la página colgada. */
@@ -245,29 +284,57 @@ Page({
     s.w.unit.setProperty(hmUI.prop.TEXT, 'lpm · midiendo SpO2')
     this.setRing(0, COLORS.state.recovery)
     if (!s.spo2Sensor) return this.finishSpo2(null)
+
+    // Si la vez anterior el reloj se cerró durante la SpO2, no se arranca la medición manual:
+    // se usa la última lectura automática del reloj si es de hoy.
+    if (s.spo2CrashStep) {
+      const auto = this.readAutoSpo2()
+      this.setStatus(auto !== null ? `SpO2: se usa la última lectura de hoy (${auto} %).` : 'SpO2 manual desactivada esta vez.')
+      return this.finishSpo2(auto)
+    }
+
     this.setStatus(SPO2_TEXT.measuring)
-    const onSpo2 = () => this.guard(() => this.checkSpo2())
-    // Marca de tiempo del último resultado guardado: un "éxito" con la misma marca es una lectura vieja
     try {
+      // Marca de tiempo del último resultado guardado: un "éxito" con la misma marca es una lectura vieja
       s.spo2PrevTime = s.spo2Sensor.time
     } catch (e) {
       s.spo2PrevTime = null
     }
+    // El callback solo marca que hubo cambio: leer, detener o quitar el listener dentro del propio
+    // evento del sensor puede cerrar la app (error nativo, no se atrapa). Todo eso lo hace el tick.
+    const onSpo2 = () => {
+      s.spo2Changed = true
+    }
     try {
-      // La doc recomienda stop() antes de start() para cortar una medición anterior
-      s.spo2Sensor.stop()
+      trace('listen')
       s.spo2Sensor.addEventListener(hmSensor.event.CHANGE, onSpo2)
       s.spo2Callback = onSpo2
+      trace('start')
       s.spo2Sensor.start()
+      s.spo2Started = true
+      trace('measuring')
     } catch (e) {
-      s.spo2Callback = null
+      this.setStatus(`SpO2 no disponible: ${(e && e.message) || e}`, COLORS.danger)
+      return this.finishSpo2(null)
     }
   },
 
-  /** Lee el sensor; solo acepta retcode 2 (éxito) con un valor plausible. */
+  /** Última SpO2 automática del reloj (sin arrancar medición), solo si es de hoy. */
+  readAutoSpo2() {
+    try {
+      const v = this.state.spo2Sensor.current
+      const t = this.state.spo2Sensor.time
+      return validSpo2(v) && spo2IsFromToday(t) ? v : null
+    } catch (e) {
+      return null
+    }
+  },
+
+  /** Lo llama el tick (nunca el evento del sensor). Solo acepta un resultado nuevo con éxito. */
   checkSpo2() {
     const s = this.state
-    if (s.phase !== 'spo2' || !s.spo2Sensor) return
+    if (s.phase !== 'spo2' || !s.spo2Started) return
+    s.spo2Changed = false
     let value = null
     let retcode = null
     let time = null
@@ -278,28 +345,36 @@ Page({
     } catch (e) {}
     const st = spo2Status(retcode, value)
     if (st === 'success') {
-      // Se exige un resultado nuevo: marca de tiempo distinta a la de antes de start(),
+      // Resultado nuevo: marca de tiempo distinta a la de antes de start(),
       // o, si el reloj no da marca, al menos SPO2_MIN_MS desde que empezó.
       const fresh =
         typeof time === 'number' && typeof s.spo2PrevTime === 'number'
           ? time !== s.spo2PrevTime
           : Date.now() - s.spo2T0 >= SPO2_MIN_MS
-      if (fresh) return this.finishSpo2(value)
+      if (fresh) this.finishSpo2(value)
       return
     }
     if (st === 'failed') return this.finishSpo2(null)
     if (SPO2_TEXT[st]) this.setStatus(SPO2_TEXT[st])
   },
 
+  /** Quita el listener y detiene el sensor, solo si se arrancó (stop() sin start() no se llama). */
   stopSpo2() {
     const s = this.state
-    try {
-      if (s.spo2Callback) s.spo2Sensor.removeEventListener(hmSensor.event.CHANGE, s.spo2Callback)
-    } catch (e) {}
-    try {
-      if (s.spo2Sensor) s.spo2Sensor.stop()
-    } catch (e) {}
-    s.spo2Callback = null
+    if (s.spo2Callback) {
+      try {
+        s.spo2Sensor.removeEventListener(hmSensor.event.CHANGE, s.spo2Callback)
+      } catch (e) {}
+      s.spo2Callback = null
+    }
+    if (s.spo2Started) {
+      trace('stop')
+      try {
+        s.spo2Sensor.stop()
+      } catch (e) {}
+      s.spo2Started = false
+    }
+    trace('done')
   },
 
   finishSpo2(value) {

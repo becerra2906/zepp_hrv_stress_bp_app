@@ -510,3 +510,14 @@ test('historial: caché en memoria, sin escrituras repetidas y perfil horario so
   assert.equal(days.filter((d) => d.hourly).length, 35 - 1) // el 31-oct (sin hourly) es el más reciente
   delete globalThis.hmFS
 })
+
+test('preparación: lectura automática de SpO2 de hoy (segundos o ms)', async () => {
+  const { spo2IsFromToday } = await import('../lib/readiness.js')
+  const now = new Date(2026, 9, 31, 9, 0)
+  const morning = new Date(2026, 9, 31, 6, 30).getTime()
+  assert.equal(spo2IsFromToday(morning, now), true)
+  assert.equal(spo2IsFromToday(Math.floor(morning / 1000), now), true)
+  assert.equal(spo2IsFromToday(new Date(2026, 9, 30, 23, 0).getTime(), now), false)
+  assert.equal(spo2IsFromToday(0, now), false)
+  assert.equal(spo2IsFromToday(undefined, now), false)
+})

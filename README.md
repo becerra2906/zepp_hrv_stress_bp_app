@@ -59,7 +59,7 @@ utils/                   Almacenamiento hmFS, pantalla/escala, series histórica
 shared/                  MessageBuilder oficial de Zepp OS 1.0 (BLE reloj ↔ Side Service) y polyfills
 release/                 Paquete .zpk compilado para Amazfit T-Rex 2 y código QR en PNG
 scripts/                 build-preview.mjs (ZPK del T-Rex 2), make-icon.mjs (iconos por target) y make-qr.mjs
-test/                    Suite de 28 pruebas unitarias automatizadas (node --test)
+test/                    Suite de 29 pruebas unitarias automatizadas (node --test)
 ```
 
 ---
@@ -86,7 +86,7 @@ test/                    Suite de 28 pruebas unitarias automatizadas (node --tes
 
 ```bash
 npm install                  # Instala dependencias (@zeppos/zeus-cli y @zeppos/device-types)
-npm test                     # Ejecuta las 28 pruebas unitarias (node --test)
+npm test                     # Ejecuta las 29 pruebas unitarias (node --test)
 node scripts/build-preview.mjs  # Compila el .zab y lo copia (más el ZPK del T-Rex 2) a release/
 node scripts/make-qr.mjs     # Regenera el código QR en release/qr-trex2.png
 npx zeus preview             # Sube a Zepp y muestra un QR oficial (requiere `npx zeus login`)
