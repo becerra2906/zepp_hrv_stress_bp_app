@@ -55,8 +55,11 @@ if (actualMd5 !== trexEntry.md5) {
 }
 
 mkdirSync('release', { recursive: true })
+// El QR zpkd1:// debe servir el .zab completo (con manifest.json), igual que `zeus preview`:
+// la app Zepp elige el ZPK del reloj desde el manifest. Un .zpk suelto da "failed to unzip package".
+copyFileSync(path.join('dist', zabName), path.join('release', 'activacion-os1.zab'))
+// ZPK del T-Rex 2 solo como referencia / instalación manual
 copyFileSync(zpkPath, path.join('release', 'activacion-trex2.zpk'))
-copyFileSync(zpkPath, path.join('release', 'activacion-trex2-os1.zpk'))
 
 rmSync(tmpDir, { recursive: true, force: true })
 console.log('Verified native @zeppos/zpm preview ZPK:', {

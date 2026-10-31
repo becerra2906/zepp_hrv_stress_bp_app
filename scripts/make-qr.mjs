@@ -65,7 +65,7 @@ export function renderQrPng(text, outPath, { scale = 10, margin = 4 } = {}) {
 
 const url =
   process.argv[2] ||
-  'zpkd1://raw.githubusercontent.com/becerra2906/zepp_hrv_stress_bp_app/main/release/activacion-trex2-os1.zpk'
+  'zpkd1://raw.githubusercontent.com/becerra2906/zepp_hrv_stress_bp_app/main/release/activacion-os1.zab'
 const customOut = process.argv[3]
 
 if (customOut) {

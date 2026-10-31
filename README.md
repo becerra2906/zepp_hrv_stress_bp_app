@@ -10,7 +10,7 @@ Aplicación de bienestar para relojes **Amazfit con Zepp OS 1.0** (T-Rex 2, GTR 
 
 El T-Rex 2 corre **Zepp OS 1.0** (API 1.0), así que la app usa `configVersion: "v2"` y las APIs globales `hmUI` / `hmSensor` / `hmFS` / `hmApp`. Un paquete de Zepp OS 2.0+ (`configVersion: "v3"`, módulos `@zos/*`) no se instala en el T-Rex 2 y da *"failed to unzip the app"*.
 
-El paquete compilado en modo `preview` para **Amazfit T-Rex 2** (`deviceSource` 418 / 419, pantalla redonda 454×454 px) se encuentra en [`release/activacion-trex2-os1.zpk`](./release/activacion-trex2-os1.zpk).
+El QR apunta al bundle compilado en modo `preview` [`release/activacion-os1.zab`](./release/activacion-os1.zab). Es el mismo formato que sube `zeus preview`: un `.zab` con `manifest.json` desde el que la app Zepp elige el ZPK de tu reloj (T-Rex 2 = `deviceSource` 418 / 419, 454×454 px). Apuntar el QR a un `.zpk` suelto también da *"failed to unzip package"*, porque no lleva `manifest.json`. [`release/activacion-trex2.zpk`](./release/activacion-trex2.zpk) queda solo como referencia.
 
 > ⏱️ Los paquetes `preview` caducan **48 h** después de compilarse (`packageInfo.expiredTime`). Si ya pasó ese tiempo, regenera con `node scripts/build-preview.mjs` y sube el cambio. La vía más fiable es `npx zeus login` y luego `npx zeus preview` (elige el target `trex2`), que sube el paquete a Zepp y muestra un QR oficial.
 
@@ -18,7 +18,7 @@ El paquete compilado en modo `preview` para **Amazfit T-Rex 2** (`deviceSource` 
 
 **URL del protocolo Zepp Developer Mode:**
 ```text
-zpkd1://raw.githubusercontent.com/becerra2906/zepp_hrv_stress_bp_app/main/release/activacion-trex2-os1.zpk
+zpkd1://raw.githubusercontent.com/becerra2906/zepp_hrv_stress_bp_app/main/release/activacion-os1.zab
 ```
 
 ### Pasos para instalar en el reloj:
@@ -73,7 +73,7 @@ test/                    Suite de 19 pruebas unitarias automatizadas (node --tes
 ```bash
 npm install                  # Instala dependencias (@zeppos/zeus-cli y @zeppos/device-types)
 npm test                     # Ejecuta las 19 pruebas unitarias (node --test)
-node scripts/build-preview.mjs  # Compila el .zab y copia el ZPK del T-Rex 2 a release/
+node scripts/build-preview.mjs  # Compila el .zab y lo copia (más el ZPK del T-Rex 2) a release/
 node scripts/make-qr.mjs     # Regenera el código QR en release/qr-trex2.png
 npx zeus preview             # Sube a Zepp y muestra un QR oficial (requiere `npx zeus login`)
 npx zeus dev                 # Ejecuta en el simulador oficial de Zepp OS
