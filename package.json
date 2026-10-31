@@ -1,0 +1,20 @@
+{
+  "name": "zepp-activacion",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "App Zepp OS: activación autonómica, FC de reposo, estrés y presión arterial",
+  "scripts": {
+    "test": "node --test test/lib.test.mjs",
+    "dev": "zeus dev",
+    "build": "zeus build",
+    "preview": "zeus preview"
+  },
+  "devDependencies": {
+    "@zeppos/device-types": "^3.0.0",
+    "@zeppos/zeus-cli": "^1.5.12"
+  },
+  "_moduleAliases": {
+    "zeppos-app-utils": "node_modules/@zeppos/zeus-cli/private-modules/zeppos-app-utils"
+  }
+}

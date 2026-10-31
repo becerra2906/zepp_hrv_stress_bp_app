@@ -1,0 +1,55 @@
+{
+  "configVersion": "v3",
+  "app": {
+    "appId": 1000001,
+    "appName": "Activación",
+    "appType": "app",
+    "version": {
+      "code": 1,
+      "name": "0.1.0"
+    },
+    "icon": "icon.png",
+    "vender": "aleja",
+    "description": "Activación autonómica en tiempo real, FC de reposo, estrés y presión arterial"
+  },
+  "permissions": [
+    "data:user.hd.heart_rate",
+    "data:user.hd.stress",
+    "data:user.hd.step"
+  ],
+  "runtime": {
+    "apiVersion": {
+      "compatible": "2.0.0",
+      "target": "2.0.0",
+      "minVersion": "2.0.0"
+    }
+  },
+  "targets": {
+    "default": {
+      "module": {
+        "page": {
+          "pages": [
+            "page/home/index",
+            "page/bp/index",
+            "page/insights/index"
+          ]
+        },
+        "app-side": {
+          "path": "app-side/index"
+        },
+        "setting": {
+          "path": "setting/index"
+        }
+      },
+      "platforms": [
+        { "st": "r", "dw": 480 },
+        { "st": "s", "dw": 390 }
+      ]
+    }
+  },
+  "i18n": {
+    "es-ES": { "appName": "Activación" },
+    "en-US": { "appName": "Activation" }
+  },
+  "defaultLanguage": "es-ES"
+}

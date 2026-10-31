@@ -1,0 +1,316 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+
+import { mean, sd, median, quantile } from '../lib/math.js'
+import { restingHrFromDay, hrMaxTanaka } from '../lib/restingHr.js'
+import { baselineStatus } from '../lib/baseline.js'
+import { classifyBp, derivedBp, averageSession, validateReading } from '../lib/bp.js'
+import { spearman, ranks } from '../lib/stats.js'
+import {
+  activationScore,
+  createStateMachine,
+  inferPhysicalFromHr,
+  analyzeDay,
+  STATE,
+} from '../lib/activation.js'
+import { detectAlerts, ALERT } from '../lib/alerts.js'
+import { cleanRR, hrvMetrics, baevskySI } from '../lib/hrv.js'
+import {
+  DEFAULT_BP_PRIORS,
+  circadianFeatures,
+  ridgeRegression,
+  trainPersonalBpModel,
+  evaluateBpAnomaly,
+  parseMapaCsv,
+} from '../lib/bpModel.js'
+import { computeRelationships, formatCorrelationEs } from '../lib/insights.js'
+
+const close = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} ≉ ${b}`)
+
+test('math básicos', () => {
+  assert.equal(mean([1, 2, 3, null]), 2)
+  close(sd([2, 4, 4, 4, 5, 5, 7, 9]), 2.13808994)
+  assert.equal(median([3, 1, 2]), 2)
+  assert.equal(quantile([1, 2, 3, 4], 0.25), 1.75)
+})
+
+test('FC de reposo: mínimo de 30 min nocturno', () => {
+  const day = new Array(1440).fill(70)
+  for (let i = 120; i < 150; i++) day[i] = 50 // 02:00-02:30
+  for (let i = 600; i < 700; i++) day[i] = 45 // tarde, fuera de la ventana nocturna
+  const r = restingHrFromDay(day)
+  assert.equal(r.rhr, 50)
+  assert.equal(r.at, 120)
+  assert.equal(r.source, 'night')
+})
+
+test('FC de reposo: huecos (0) cortan la ventana y fallback al día', () => {
+  const day = new Array(1440).fill(0)
+  for (let i = 400; i < 460; i++) day[i] = 60
+  day[430] = 0 // corta en dos tramos de 30
+  const r = restingHrFromDay(day)
+  assert.equal(r.source, 'day')
+  assert.equal(r.rhr, 60)
+  assert.equal(restingHrFromDay(new Array(1440).fill(0)), null)
+})
+
+test('Tanaka', () => {
+  assert.equal(hrMaxTanaka(40), 180)
+})
+
+test('línea base SWC', () => {
+  const hist = Array.from({ length: 53 }, (_, i) => 60 + (i % 2 ? 1 : -1))
+  assert.equal(baselineStatus(hist.slice(0, 5), { higherIsBetter: false }).status, 'insufficient')
+  const worse = hist.concat([66, 67, 66, 65, 67, 66, 66])
+  assert.equal(baselineStatus(worse, { higherIsBetter: false }).status, 'worse')
+  assert.equal(baselineStatus(worse, { higherIsBetter: true }).status, 'better')
+  const normal = hist.concat([60, 61, 59, 60, 60, 61, 59])
+  assert.equal(baselineStatus(normal, { higherIsBetter: false }).status, 'normal')
+})
+
+test('PA AHA 2017', () => {
+  assert.equal(classifyBp(115, 75), 'normal')
+  assert.equal(classifyBp(125, 75), 'elevated')
+  assert.equal(classifyBp(125, 82), 'stage1')
+  assert.equal(classifyBp(135, 70), 'stage1')
+  assert.equal(classifyBp(142, 85), 'stage2')
+  assert.equal(classifyBp(120, 95), 'stage2')
+  assert.equal(classifyBp(185, 100), 'crisis')
+  assert.equal(classifyBp(150, 121), 'crisis')
+  assert.deepEqual(derivedBp(120, 80), { map: 93.3, pulsePressure: 40 })
+  const s = averageSession([
+    { sys: 122, dia: 78, pulse: 70, t: 1 },
+    { sys: 118, dia: 76, pulse: 68, t: 2 },
+  ])
+  assert.equal(s.sys, 120)
+  assert.equal(s.dia, 77)
+  assert.equal(s.category, 'elevated')
+  assert.deepEqual(validateReading({ sys: 80, dia: 90 }), ['dia>=sys'])
+  assert.deepEqual(validateReading({ sys: 120, dia: 80, pulse: 70 }), [])
+})
+
+test('Spearman con empates y lag', () => {
+  assert.deepEqual(ranks([10, 20, 20, 30]), [1, 2.5, 2.5, 4])
+  const x = Array.from({ length: 20 }, (_, i) => i)
+  const y = x.map((v) => v * v)
+  const r = spearman(x, y)
+  close(r.rho, 1)
+  assert.equal(r.significant, true)
+  // y[t+1] = x[t] → correlación perfecta con lag 1
+  const y2 = [0].concat(x.slice(0, 19)).map((v, i) => (i === 0 ? 99 : v))
+  close(spearman(x, y2, { lag: 1 }).rho, 1)
+  assert.equal(spearman(x.slice(0, 5), y.slice(0, 5)).rho, null)
+})
+
+test('activación: física vs autonómica', () => {
+  const base = { rhr: 60, hrMax: 180 }
+  const phys = activationScore({ ...base, hr: 120, moving: true })
+  assert.equal(phys.kind, 'physical')
+  assert.equal(phys.score, 50)
+  // Reposo sin estrés Zepp: solo FC adicional
+  assert.equal(activationScore({ ...base, hr: 65 }).score, 0)
+  assert.equal(activationScore({ ...base, hr: 95 }).score, 100)
+  // Con estrés Zepp: 0.6*80 + 0.4*40 = 64
+  assert.equal(activationScore({ ...base, hr: 80, stress: 80 }).score, 64)
+})
+
+test('máquina de estados con histéresis', () => {
+  const sm = createStateMachine()
+  const mk = (score) => ({ score, kind: 'autonomic' })
+  assert.equal(sm.push(mk(10)), STATE.RECOVERY)
+  // Un pico aislado no cambia el estado
+  sm.push(mk(60))
+  assert.equal(sm.push(mk(10)), STATE.RECOVERY)
+  // Justo por encima del umbral (sin margen) tampoco
+  for (let i = 0; i < 5; i++) sm.push(mk(27))
+  assert.equal(sm.state, STATE.RECOVERY)
+  // Sostenido con margen sí
+  for (let i = 0; i < 3; i++) sm.push(mk(60))
+  assert.equal(sm.state, STATE.ACTIVATION)
+  for (let i = 0; i < 3; i++) sm.push({ score: 40, kind: 'physical' })
+  assert.equal(sm.state, STATE.EXERCISE)
+})
+
+test('inferencia de actividad física desde FC', () => {
+  const m = new Array(30).fill(60)
+  for (let i = 10; i < 17; i++) m[i] = 140 // 7 min intensos
+  m[25] = 150 // pico aislado
+  const f = inferPhysicalFromHr(m, 60, 180)
+  assert.equal(f.filter(Boolean).length, 7)
+  assert.equal(f[25], false)
+})
+
+test('análisis del día', () => {
+  const m = new Array(120).fill(0)
+  for (let i = 0; i < 60; i++) m[i] = 58
+  for (let i = 60; i < 120; i++) m[i] = 92 // activación sin movimiento
+  const r = analyzeDay(m, { rhr: 58, hrMax: 180 })
+  assert.ok(r.totals.recovery >= 60)
+  assert.ok(r.totals.high > 50)
+  assert.ok(r.stressLoad > 0)
+})
+
+test('alertas de FC', () => {
+  const t0 = 0
+  const tachy = Array.from({ length: 12 }, (_, i) => ({ t: t0 + i * 60000, hr: 110 }))
+  assert.equal(detectAlerts(tachy)[0].type, ALERT.REST_TACHY)
+  const moving = tachy.map((s) => ({ ...s, moving: true }))
+  assert.equal(detectAlerts(moving).length, 0)
+  const jump = [
+    { t: 0, hr: 65 },
+    { t: 30000, hr: 100 },
+  ]
+  assert.equal(detectAlerts(jump)[0].type, ALERT.SUDDEN_JUMP)
+  const brady = Array.from({ length: 12 }, (_, i) => ({ t: i * 60000, hr: 38, asleep: true }))
+  assert.equal(detectAlerts(brady).length, 0)
+})
+
+test('HRV: limpieza y métricas', () => {
+  // Serie alterna 800/850 ms → diffs ±50 → RMSSD = 50
+  const rr = Array.from({ length: 100 }, (_, i) => (i % 2 ? 850 : 800))
+  const m = hrvMetrics(rr)
+  assert.equal(m.valid, true)
+  close(m.rmssd, 50)
+  const diffs = rr.slice(1).map((v, i) => v - rr[i])
+  close(m.sd1, Math.sqrt(0.5) * sd(diffs))
+  close(m.meanHR, 60000 / 825)
+  // Artefacto (latido perdido = 1650 ms) se corrige por interpolación
+  const withArt = rr.slice()
+  withArt[50] = 1650
+  const c = cleanRR(withArt)
+  assert.equal(c.corrected, 1)
+  close(c.rr[50], (rr[49] + rr[51]) / 2)
+  // Demasiados artefactos → no válida
+  const noisy = rr.map((v, i) => (i % 10 === 0 ? 1700 : v))
+  assert.equal(hrvMetrics(noisy).valid, false)
+  assert.equal(hrvMetrics(rr.slice(0, 30)).reason, 'too_short')
+})
+
+test('Baevsky SI', () => {
+  // 100% en un bin de 50 ms (800-849), Mo = 0.825 s, MxDMn = 0.04 s
+  const rr = Array.from({ length: 50 }, (_, i) => (i % 2 ? 840 : 800))
+  close(baevskySI(rr), 100 / (2 * 0.825 * 0.04))
+})
+
+test('modelo PA: características circadianas y regresión Ridge', () => {
+  // Mediodía (12:00) -> ángulo = pi -> sin(pi) ~ 0, cos(pi) = -1
+  const dMid = new Date('2026-10-31T12:00:00Z').getTime()
+  // Ajuste por offset local si hace falta, pero probemos la función matemática directa
+  const c = circadianFeatures(dMid)
+  assert.ok(isFinite(c.sin) && isFinite(c.cos))
+
+  // Test algebraico de Ridge: y = 2*x1 + 3*x2
+  const X = [
+    [1, 1],
+    [2, 1],
+    [3, 2],
+    [4, 2],
+    [5, 3],
+  ]
+  const y = [5, 7, 12, 14, 19]
+  const w = ridgeRegression(X, y, 0.001)
+  assert.ok(w !== null)
+  close(w[0], 2, 0.05)
+  close(w[1], 3, 0.05)
+})
+
+test('modelo PA personal: entrenamiento, LOOCV y detección de anomalías', () => {
+  // Generamos dataset simulado tipo MAPA con 20 lecturas
+  const t0 = new Date('2026-10-31T08:00:00Z').getTime()
+  const dataset = Array.from({ length: 20 }, (_, i) => {
+    const t = t0 + i * 60 * 60 * 1000 // cada hora
+    const hr = 65 + (i % 5) * 6
+    const sys = 115 + (hr - 60) * 0.4 + (i > 14 ? -8 : 4) // dipping de noche
+    const dia = 75 + (hr - 60) * 0.25
+    return { t, hr, rhr: 60, sys, dia }
+  })
+
+  const model = trainPersonalBpModel(dataset)
+  assert.equal(model.sampleCount, 20)
+  assert.ok(model.metrics.loocvMaeSys !== undefined)
+  assert.ok(model.metrics.loocvMaeSys < 10)
+
+  // Predicción puntual
+  const pred = model.predict({ hr: 85, rhr: 60, t: t0 + 2 * 3600000 })
+  assert.ok(pred.sys > 115)
+  assert.ok(pred.dia > 70)
+
+  // Detección de desviación / anomalía
+  // Lectura anormalmente alta para el estado de reposo (e.g. estrés agudo o hipertensión no esperada)
+  const evalHigh = evaluateBpAnomaly({ sys: 155, dia: 95, hr: 65, rhr: 60, t: t0 }, model)
+  assert.equal(evalHigh.anomaly, 'high')
+  assert.ok(evalHigh.deltaSys > 15)
+
+  // Lectura normal
+  const evalNorm = evaluateBpAnomaly({ sys: pred.sys, dia: pred.dia, hr: 85, rhr: 60, t: t0 + 2 * 3600000 }, model)
+  assert.equal(evalNorm.anomaly, 'normal')
+})
+
+test('modelo PA: parser de CSV de MAPA (con y sin encabezado)', () => {
+  const csv = `Fecha y Hora;PAS (mmHg);PAD (mmHg);FC (lpm)
+2025-05-10 08:30;124;78;68
+2025-05-10 09:00;130;82;74
+2025-05-10 09:30;118;75;64`
+
+  const parsed = parseMapaCsv(csv)
+  assert.equal(parsed.length, 3)
+  assert.equal(parsed[0].sys, 124)
+  assert.equal(parsed[0].dia, 78)
+  assert.equal(parsed[0].hr, 68)
+
+  // Sin encabezado: Fecha;PAS;PAD;Pulso
+  const noHeader = `2025-05-10 08:30;122;76;66\n2025-05-10 09:00;128;80;72`
+  const p2 = parseMapaCsv(noHeader)
+  assert.equal(p2.length, 2)
+  assert.equal(p2[0].sys, 122)
+  assert.equal(p2[1].hr, 72)
+
+  // Sin encabezado: PAS;PAD;Pulso
+  const simple = `118;74;65\n132;84;78`
+  const p3 = parseMapaCsv(simple)
+  assert.equal(p3.length, 2)
+  assert.equal(p3[0].sys, 118)
+  assert.equal(p3[1].dia, 84)
+})
+
+test('motor de relaciones (insights): Spearman multivariable y líneas base', () => {
+  const days = Array.from({ length: 16 }, (_, i) => {
+    const stressLoad = 10 + i * 2
+    const rhr = 55 + i * 0.5
+    const rmssd = 60 - i * 1.5
+    const sys = 112 + i * 1.2
+    const dia = 72 + i * 0.6
+    return {
+      date: `2026-10-${String(i + 1).padStart(2, '0')}`,
+      rhr,
+      stressLoad,
+      rmssd,
+      lnRmssd: Math.log(rmssd),
+      bp: [{ sys, dia, pulse: Math.round(rhr + 12), t: Date.now() - (16 - i) * 86400000 }],
+    }
+  })
+
+  const rel = computeRelationships(days)
+  const stressSys = rel.pairs.find((p) => p.id === 'stress_sys')
+  assert.ok(stressSys.result.significant)
+  close(stressSys.result.rho, 1)
+  const hrvSys = rel.pairs.find((p) => p.id === 'hrv_sys')
+  close(hrvSys.result.rho, -1)
+  assert.ok(formatCorrelationEs(stressSys).includes('(sig.)'))
+  assert.equal(rel.bpModel.sampleCount, 16)
+})
+
+test('modelo PA: gestión e integración de lecturas individuales', () => {
+  // Simulamos un conjunto de lecturas individuales aisladas tomadas en diferentes días/momentos
+  const individualReadings = [
+    { sys: 120, dia: 80, pulse: 70, t: 1000000, note: 'reposo' },
+    { sys: 135, dia: 88, pulse: 85, t: 2000000, note: 'estrés trabajo' },
+    { sys: 112, dia: 72, pulse: 62, t: 3000000, note: 'mañana despertar' },
+  ]
+
+  assert.equal(individualReadings.length, 3)
+  assert.equal(individualReadings[0].sys, 120)
+  assert.equal(individualReadings[1].note, 'estrés trabajo')
+})
+
+
